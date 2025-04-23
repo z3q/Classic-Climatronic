@@ -21,13 +21,17 @@
 // Пин для аналогового входа (P1.4 - A4)
 #define SETPOINT_ADC_IN  INCH_4
 
-// Коэффициенты ПД-регулятора (фиксированная точка Q8.8)
+// Коэффициенты ПИД-регулятора (фиксированная точка Q8.8)
 #define KP 0x0200  // 2.0
 #define KD 0x0500  // 5.0
+#define KI 0x0014 // 0.0003 * 65536 ≈ 20 (использовать в расчете как (KI * integral) >> 16) 0,0003/сек точность Q16.16
 
 #define MIN_VALID_TEMP  -550  // -55.0°C (минимальная возможная температура для DS18B20)
 #define MAX_VALID_TEMP  800  // 80.0°C (максимальная возможная температура)
 #define TEMP_READ_ERROR 2000  // Значение при ошибке чтения
+
+#define SETPOINT_MIN_Q6  1024 // (16.0 * 64)  = 1024 (16.0°C в Q10.6) минимальная уставка
+#define SETPOINT_RANGE_Q6 600 // (9.375 * 64)  = 600 (9.375°C в Q10.6) диапазон уставки
 
 
 // Ограничения ШИМ
@@ -42,12 +46,14 @@
 // Глобальные переменные
 volatile uint16_t setpoint = 0;
 volatile uint16_t temperature = 0;
+volatile int32_t integral = 0;  // Накопленная интегральная сумма (Q16.16)
 volatile int16_t lastError = 0;
 volatile uint16_t pwmValue = 0;
 volatile uint16_t pwmCounter = 0;
 volatile uint16_t updateCounter = 0;
 volatile uint8_t measureFlag = 0;
 volatile uint8_t updateFlag = 0;
+volatile int16_t lastADC = 0;  // последнее значение АЦП - нужно для детектирования изменения уставки
 
 TM1637TinyDisplay display(CLK, DIO);
 
@@ -79,6 +85,8 @@ int main(void) {
         if(measureFlag) {
             measureFlag = 0;
             temperature = readDS18B20();
+            display.clear();
+            if (temperature != TEMP_READ_ERROR) display.showNumber((int)(temperature>>6), true, 2, 2);
           }
         
         
@@ -87,16 +95,21 @@ int main(void) {
             // Чтение уставки (0-1023 -> 160-250, фиксированная точка 10.6)
             uint16_t adcValue = readADC();
             if (adcValue > 1023) adcValue = 1023; // Защита от переполнения
-            setpoint = 160 + ((adcValue * 90) >> 10);  // 16.0-25.0°C
+            setpoint = SETPOINT_MIN_Q6 + ((adcValue * SETPOINT_RANGE_Q6) >> 10);  // 16.0-25.3°C
             
             // Расчет ошибки (фиксированная точка 10.6)
             int16_t error = setpoint - temperature;
+
+            // Интегральная составляющая (с насыщением)
+            integral += error;
+            if(integral > 3276700) integral = 3276700;  // Ограничение
+            if(integral < -3276700) integral = -3276700;
             
             // Расчет производной ошибки (dError/dt)
             int16_t dError = error - lastError;
             
-            // Расчет выхода ПД-регулятора (фиксированная точка)
-            int32_t output = (KP * error) + (KD * dError);
+            // Расчет выхода (Q16.16)
+            int32_t output = (KP * error) + (KD * dError) + ((KI * integral) >> 16);
             
             // Масштабирование и ограничение выхода
             output >>= 6;
@@ -104,22 +117,25 @@ int main(void) {
             if (output > PWM_MAX) output = PWM_MAX;
             
             // вывод на экран
-            display.clear();
-            display.showNumber((int)round(setpoint/10), true, 2, 0);
-            display.showNumber((int)(temperature/10), true, 2, 2);
+
+            
             // Установка ШИМ
-            if(temperature == TEMP_READ_ERROR) {
-              // Действия при ошибке (например, безопасный режим)
+            if(temperature == TEMP_READ_ERROR) {  // Действия при ошибке датчика
               pwmValue = adcValue >> 2; // прямое управление ШИМ
-              display.showString("Er",2,2);
+              display.showString("Er",2,2); // показать ошибку
             } else {
-            pwmValue = (uint16_t)output;
+                pwmValue = (uint16_t)output;
+                if (abs(adcValue-lastADC) > 100) { // Если поменяли уставку, показать новое значение
+                    display.showNumber((int)(setpoint>>6), true, 2, 2);  // Показать значение уставки
+                    updateCounter = 0;  // Отложить измерение на 30 секунд, чтобы показать уставку
+                    lastADC = adcValue; // Запомнить уставку для следующего сравнения
+                }
             }
-            TA0CCR1 = pwmValue;
+            display.showNumberHex(pwmValue, 0, false, 2, 0);    // Показать значение ШИМ
+            TA0CCR1 = pwmValue;     //Записать регистр ШИМ
             lastError = error;
-                
-        LPM3;
           }
+          LPM3;
     }
   }
 
@@ -220,43 +236,61 @@ uint8_t oneWireRead() {
 }
 
 uint16_t readDS18B20() {
-  uint16_t temp = TEMP_READ_ERROR; // Значение по умолчанию при ошибке
-  
-  oneWireReset();
-  if (oneWireRead() != 0xCC) return TEMP_READ_ERROR; // Проверка присутствия датчика
-  
-  oneWireWrite(0x44);  // Запуск преобразования
-  
-  // Ожидание завершения преобразования с таймаутом
-  uint32_t timeout = 0;
-  DS18B20_PIN_DIR &= ~DS18B20_PIN;
-  while (!(DS18B20_PIN_IN & DS18B20_PIN)) {
-      __delay_cycles(1000);
-      if (++timeout > 1000) return TEMP_READ_ERROR; // Таймаут 1 секунда
-  }
-  
-  oneWireReset();
-  oneWireWrite(0xCC);  // Skip ROM
-  oneWireWrite(0xBE);  // Read Scratchpad
-  
-  uint8_t lsb = oneWireRead();
-  uint8_t msb = oneWireRead();
-  uint8_t crc = oneWireRead(); // Можно добавить проверку CRC при необходимости
-  
-  temp = (msb << 8) | lsb;
-  
-  // Проверка на корректность значения
-  if (temp == 0xFFFF || temp == 0x0000) {
-      return TEMP_READ_ERROR; // Ошибочные показания
-  }
-  
-  // Конвертация в градусы Цельсия (фиксированная точка 10.6)
-  int16_t converted_temp = (temp >> 4) * 10 + ((temp & 0x0F) * 10) / 16;
-  
-  // Проверка диапазона
-  if (converted_temp < MIN_VALID_TEMP || converted_temp > MAX_VALID_TEMP) {
-      return TEMP_READ_ERROR;
-  }
-  
-  return (uint16_t)converted_temp;
+    uint16_t temp = TEMP_READ_ERROR;
+    uint8_t presence = 0;
+    
+    // 1. Reset и проверка присутствия
+    DS18B20_PIN_DIR |= DS18B20_PIN;
+    DS18B20_PIN_OUT &= ~DS18B20_PIN;
+    __delay_cycles(480);       // Reset pulse (минимум 480 мкс)
+    DS18B20_PIN_DIR &= ~DS18B20_PIN;
+    __delay_cycles(70);        // Ожидание presence pulse (15-60 мкс)
+    presence = !(DS18B20_PIN_IN & DS18B20_PIN);
+    __delay_cycles(410);       // Завершение тайминга reset
+    
+    if (!presence) {
+        display.showString("NC"); // No sensor connected
+        return TEMP_READ_ERROR;
+    }
+    
+    // 2. Запуск преобразования
+    oneWireWrite(0xCC);        // Skip ROM
+    oneWireWrite(0x44);        // Convert T
+    
+    // 3. Ожидание завершения с таймаутом (~750ms)
+    uint32_t timeout = 0;
+    #define CONVERSION_TIMEOUT_CYCLES 750000 // Для 1MHz ~750ms
+    
+    while (timeout++ < CONVERSION_TIMEOUT_CYCLES) {
+        __delay_cycles(1000); // Проверяем каждые 1ms
+        
+        oneWireReset();
+        oneWireWrite(0xCC);
+        oneWireWrite(0xBE);     // Читаем scratchpad
+        if (oneWireRead()) break; // Бит 0 = 1 -> преобразование завершено
+    }
+    
+    if (timeout >= CONVERSION_TIMEOUT_CYCLES) {
+        display.showString("TO"); // Timeout
+        return TEMP_READ_ERROR;
+    }
+    
+    // 4. Чтение результата
+    oneWireReset();
+    oneWireWrite(0xCC);
+    oneWireWrite(0xBE);
+    
+    uint8_t lsb = oneWireRead();
+    uint8_t msb = oneWireRead();
+    temp = (msb << 8) | lsb;
+    
+    // 5. Конвертация и проверка диапазона
+    int16_t converted_temp = (temp >> 4) * 10 + ((temp & 0x0F) * 10) / 16;
+    
+    if (converted_temp < MIN_VALID_TEMP || converted_temp > MAX_VALID_TEMP) {
+        display.showString("RNG"); // Out of range
+        return TEMP_READ_ERROR;
+    }
+    
+    return (uint16_t)converted_temp;
 }
