@@ -33,6 +33,8 @@
 #define SETPOINT_MIN_Q6  1024 // (16.0 * 64)  = 1024 (16.0°C в Q10.6) минимальная уставка
 #define SETPOINT_RANGE_Q6 600 // (9.375 * 64)  = 600 (9.375°C в Q10.6) диапазон уставки
 
+#define ADC_DEADZONE_LOW   100   // Нижняя граница "мертвой зоны" АЦП
+#define ADC_DEADZONE_HIGH  923   // Верхняя граница "мертвой зоны" АЦП (1023 - 100)
 
 // Ограничения ШИМ
 #define PWM_MIN 0
@@ -77,7 +79,7 @@ int main(void) {
     initADC();
         
     __enable_interrupt();
-    display.setBrightness(BRIGHT_HIGH);
+    
     // Первое измерение температуры сразу
     measureFlag = 1;
     
@@ -86,39 +88,53 @@ int main(void) {
             measureFlag = 0;
             temperature = readDS18B20();
             display.clear();
-            if (temperature != TEMP_READ_ERROR) display.showNumber((int)(temperature>>6), true, 2, 2);
-          }
+            if (temperature != TEMP_READ_ERROR) {
+                display.setBrightness(BRIGHT_3);
+                display.showNumber((int)(temperature>>6), true, 2, 2);
+            }
+        }
         
         
         if(updateFlag) {
             updateFlag = 0;
+            int32_t output;
             // Чтение уставки (0-1023 -> 160-250, фиксированная точка 10.6)
             uint16_t adcValue = readADC();
-            if (adcValue > 1023) adcValue = 1023; // Защита от переполнения
-            setpoint = SETPOINT_MIN_Q6 + ((adcValue * SETPOINT_RANGE_Q6) >> 10);  // 16.0-25.3°C
+
+            if (adcValue <= ADC_DEADZONE_LOW) {
+                pwmValue = PWM_MIN;  // 0%
+            } 
+            else if (adcValue >= ADC_DEADZONE_HIGH) {
+                pwmValue = PWM_MAX;  // 100%
+            } 
+            else {
+                // Корректировка adcValue с учетом "мертвой зоны"
+                uint16_t adjustedValue = adcValue - ADC_DEADZONE_LOW;
+                       
+                // Расчет setpoint с масштабированием на новый диапазон АЦП (100-923 → 0-823) // 16.0-25.3°C
+            setpoint = SETPOINT_MIN_Q6 + (uint32_t)(adjustedValue * SETPOINT_RANGE_Q6) / (ADC_DEADZONE_HIGH - ADC_DEADZONE_LOW);  
             
             // Расчет ошибки (фиксированная точка 10.6)
             int16_t error = setpoint - temperature;
 
             // Интегральная составляющая (с насыщением)
             integral += error;
-            if(integral > 3276700) integral = 3276700;  // Ограничение
-            if(integral < -3276700) integral = -3276700;
+            if(integral > 52428800) integral = 52428800;  // Ограничение
+            if(integral < -52428800) integral = -52428800;
             
             // Расчет производной ошибки (dError/dt)
             int16_t dError = error - lastError;
             
             // Расчет выхода (Q16.16)
-            int32_t output = (KP * error) + (KD * dError) + ((KI * integral) >> 16);
+            output = (KP * error) + (KD * dError) + ((KI * integral) >> 16);
             
             // Масштабирование и ограничение выхода
             output >>= 6;
             if (output < PWM_MIN) output = PWM_MIN;
             if (output > PWM_MAX) output = PWM_MAX;
-            
-            // вывод на экран
-
-            
+            lastError = error;
+            }
+                        
             // Установка ШИМ
             if(temperature == TEMP_READ_ERROR) {  // Действия при ошибке датчика
               pwmValue = adcValue >> 2; // прямое управление ШИМ
@@ -126,6 +142,7 @@ int main(void) {
             } else {
                 pwmValue = (uint16_t)output;
                 if (abs(adcValue-lastADC) > 100) { // Если поменяли уставку, показать новое значение
+                    display.setBrightness(BRIGHT_HIGH);
                     display.showNumber((int)(setpoint>>6), true, 2, 2);  // Показать значение уставки
                     updateCounter = 0;  // Отложить измерение на 30 секунд, чтобы показать уставку
                     lastADC = adcValue; // Запомнить уставку для следующего сравнения
@@ -133,9 +150,8 @@ int main(void) {
             }
             display.showNumberHex(pwmValue, 0, false, 2, 0);    // Показать значение ШИМ
             TA0CCR1 = pwmValue;     //Записать регистр ШИМ
-            lastError = error;
-          }
-          LPM3;
+        }
+        LPM3;
     }
   }
 
