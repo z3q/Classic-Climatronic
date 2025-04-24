@@ -296,8 +296,7 @@ uint16_t readDS18B20() {
     presence = !(DS18B20_PIN_IN & DS18B20_PIN);
     __delay_cycles(410);       // Завершение тайминга reset
     
-    if (!presence) {
-        display.showString("NC"); // No sensor connected
+    if (!presence) {        // No sensor connected
         return TEMP_READ_ERROR;
     }
     
@@ -318,8 +317,7 @@ uint16_t readDS18B20() {
         if (oneWireRead()) break; // Бит 0 = 1 -> преобразование завершено
     }
     
-    if (timeout >= CONVERSION_TIMEOUT_CYCLES) {
-        display.showString("TO"); // Timeout
+    if (timeout >= CONVERSION_TIMEOUT_CYCLES) { // Timeout
         return TEMP_READ_ERROR;
     }
     
@@ -336,8 +334,7 @@ uint16_t readDS18B20() {
     int16_t converted_temp = (temp >> 4) * 10 + ((temp & 0x0F) * 10) / 16;
     
     if (converted_temp < MIN_VALID_TEMP || converted_temp > MAX_VALID_TEMP) {
-        display.showString("RNG"); // Out of range
-        return TEMP_READ_ERROR;
+       return TEMP_READ_ERROR;
     }
     
     return (uint16_t)converted_temp;
