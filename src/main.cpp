@@ -1,4 +1,4 @@
-#define DEBUG_PID  // Закомментировать для финального релиза (отключит UART и отладку)
+//#define DEBUG_PID  // Закомментировать для финального релиза (отключит UART и отладку)
 
 #include <msp430.h>
 #include <stdint.h>
@@ -32,8 +32,8 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD);  // Инициализация
 #define SETPOINT_ADC_IN  INCH_4
 
 // Коэффициенты ПИД-регулятора (фиксированная точка Q8.8)
-#define KP 0x0200  // 2.0
-#define KD 0x0500  // 5.0
+#define KP 0x0200  // 2.0 = 0x0200
+#define KD 0x0000  // 5.0 = 0x0500
 #define KI 0x0014 // 0.0003 * 65536 ≈ 20 (использовать в расчете как (KI * integral) >> 16) 0,0003/сек точность Q16.16
 
 #define MIN_VALID_TEMP  -550  // -55.0°C (минимальная возможная температура для DS18B20)
@@ -53,7 +53,7 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD);  // Инициализация
 // Интервалы (в циклах таймера)
 #define PWM_FREQ 47          // Частота ШИМ (Гц) 12000/PWM_MAX
 #define PD_UPDATE_INTERVAL PWM_FREQ // Обновление ПД каждую 1 сек (в периодах ШИМ)
-#define TEMP_MEASURE_INTERVAL 30 // Измерение температуры каждые 30 сек (в PD_UPDATE_INTERVAL)
+#define TEMP_MEASURE_INTERVAL 10 // Измерение температуры каждые 30 сек (в PD_UPDATE_INTERVAL)
 
 // Глобальные переменные
 volatile uint16_t setpoint = 0;
@@ -102,7 +102,7 @@ int main(void) {
             temperature = readDS18B20();
             display.clear();
             if (temperature != TEMP_READ_ERROR) {
-                display.setBrightness(BRIGHT_3);
+                display.setBrightness(BRIGHT_4);
                 display.showNumber((int)(temperature>>6), true, 2, 2);
             }
         }
@@ -169,7 +169,7 @@ int main(void) {
               display.showString("Er",2,2); // показать ошибку
             } else {
                 pwmValue = (uint16_t)output;
-                if (abs(adcValue-lastADC) > 100) { // Если поменяли уставку, показать новое значение
+                if (abs(adcValue-lastADC) > 10) { // Если поменяли уставку, показать новое значение
                     display.setBrightness(BRIGHT_HIGH);
                     display.showNumber((int)(setpoint>>6), true, 2, 2);  // Показать значение уставки
                     updateCounter = 0;  // Отложить измерение на 30 секунд, чтобы показать уставку
@@ -183,7 +183,7 @@ int main(void) {
             sendPIDDebug(error, p_term, integral_term, d_term, raw_output, pwmValue);       //Отправка отладочной информации
             #endif
         }
-        LPM3;
+        LPM0;
     }
   }
 
@@ -236,7 +236,7 @@ __interrupt void Timer0_A0_ISR(void) {
             measureFlag = 1;
         }
     }
-    LPM3_EXIT;
+    LPM0_EXIT;
 }
 
 // Чтение АЦП
@@ -331,12 +331,13 @@ uint16_t readDS18B20() {
     temp = (msb << 8) | lsb;
     
     // 5. Конвертация и проверка диапазона
-    int16_t converted_temp = (temp >> 4) * 10 + ((temp & 0x0F) * 10) / 16;
-    
-    if (converted_temp < MIN_VALID_TEMP || converted_temp > MAX_VALID_TEMP) {
+    int16_t converted_temp = (temp << 2) + ((temp & 0x0F) << 2);
+    // int16_t converted_temp = (temp >> 4) * 64 + ((temp & 0x0F) * 4);  // 4 = 64/16
+        
+   /* if (converted_temp < MIN_VALID_TEMP*64 || converted_temp > MAX_VALID_TEMP*64) {
        return TEMP_READ_ERROR;
     }
-    
+    */
     return (uint16_t)converted_temp;
 }
 
