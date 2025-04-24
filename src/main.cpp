@@ -1,7 +1,17 @@
+#define DEBUG_PID  // Закомментировать для финального релиза (отключит UART и отладку)
+
 #include <msp430.h>
 #include <stdint.h>
 #include <Arduino.h>
 #include <TM1637TinyDisplay.h>
+
+#ifdef DEBUG_PID
+#include <SoftwareSerial.h>  // Для эмуляции UART на GPIO
+#define DEBUG_TXD 3         // Пин для TX (P1.1)
+#define DEBUG_RXD 5         // Пин для RX (не используется)
+SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD);  // Инициализация софтового UART
+#endif
+
 
 // Module connection pins (Digital Pins)
 #define CLK 14
@@ -69,6 +79,9 @@ uint16_t readDS18B20();
 void oneWireReset();
 void oneWireWrite(uint8_t data);
 uint8_t oneWireRead();
+#ifdef DEBUG_PID
+void sendPIDDebug(int16_t error, int32_t p_term, int32_t i_term, int16_t d_term, int32_t output, uint16_t pwm);
+#endif
 
 int main(void) {
     WDTCTL = WDTPW | WDTHOLD;  // Остановить watchdog
@@ -97,7 +110,16 @@ int main(void) {
         
         if(updateFlag) {
             updateFlag = 0;
-            int32_t output;
+            int32_t output = 0;
+            #ifdef DEBUG_PID
+            int32_t raw_output = 0;
+            #endif
+            int16_t error = 0;          // Ошибка
+            int32_t integral_term = 0;  // Интегральная составляющая
+            int32_t p_term = 0;         // Пропорциональная составляющая
+            int32_t d_term = 0;         //Дифференциальная составляющая
+
+
             // Чтение уставки (0-1023 -> 160-250, фиксированная точка 10.6)
             uint16_t adcValue = readADC();
 
@@ -115,7 +137,7 @@ int main(void) {
             setpoint = SETPOINT_MIN_Q6 + (uint32_t)(adjustedValue * SETPOINT_RANGE_Q6) / (ADC_DEADZONE_HIGH - ADC_DEADZONE_LOW);  
             
             // Расчет ошибки (фиксированная точка 10.6)
-            int16_t error = setpoint - temperature;
+            error = setpoint - temperature;
 
             // Интегральная составляющая (с насыщением)
             integral += error;
@@ -125,9 +147,15 @@ int main(void) {
             // Расчет производной ошибки (dError/dt)
             int16_t dError = error - lastError;
             
+            integral_term = (KI * integral) >> 16;  // Интегральная составляющая
+            p_term = KP * error;                   // Пропорциональная
+            d_term = KD * dError;                  // Дифференциальная
             // Расчет выхода (Q16.16)
-            output = (KP * error) + (KD * dError) + ((KI * integral) >> 16);
-            
+            output = p_term + d_term + integral_term;
+            #ifdef DEBUG_PID
+            raw_output = output;
+            #endif
+
             // Масштабирование и ограничение выхода
             output >>= 6;
             if (output < PWM_MIN) output = PWM_MIN;
@@ -150,6 +178,10 @@ int main(void) {
             }
             display.showNumberHex(pwmValue, 0, false, 2, 0);    // Показать значение ШИМ
             TA0CCR1 = pwmValue;     //Записать регистр ШИМ
+                        
+            #ifdef DEBUG_PID
+            sendPIDDebug(error, p_term, integral_term, d_term, raw_output, pwmValue);       //Отправка отладочной информации
+            #endif
         }
         LPM3;
     }
@@ -310,3 +342,23 @@ uint16_t readDS18B20() {
     
     return (uint16_t)converted_temp;
 }
+
+#ifdef DEBUG_PID
+// Заголовок CSV
+void initPIDDebug() {
+    debugSerial.begin(9600);
+    debugSerial.println("Error,P-Term,I-Term,D-Term,Output,PWM"); // CSV header
+}
+
+// Функция вывода данных в CSV формате
+void sendPIDDebug(int16_t error, int32_t p_term, 
+                 int32_t i_term, int16_t d_term, 
+                 int32_t output, uint16_t pwm) {
+    debugSerial.print(error);  debugSerial.print(',');
+    debugSerial.print(p_term); debugSerial.print(',');
+    debugSerial.print(i_term); debugSerial.print(',');
+    debugSerial.print(d_term); debugSerial.print(',');
+    debugSerial.print(output); debugSerial.print(',');
+    debugSerial.println(pwm);
+}
+#endif
