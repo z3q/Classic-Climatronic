@@ -31,11 +31,11 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 #define SETPOINT_ADC_IN INCH_4
 
 // размер фильтра аналогового входа
-#define ADC_FILTER_SIZE 10
+#define ADC_FILTER_SIZE 8
 
 // Коэффициенты ПИД-регулятора (фиксированная точка Q8.8)
 #define KP 0x0020 // 2.0 = 0x0200
-#define KD 0x0000 // 5.0 = 0x0500
+#define KD 0x0100 // 5.0 = 0x0500
 #define KI 0x2000 // 0.0003 * 65536 ≈ 20 (использовать в расчете как (KI * integral) >> 16) 0,0003/сек точность Q16.16
 
 #define MIN_VALID_TEMP -550  // -55.0°C (минимальная возможная температура для DS18B20)
@@ -167,11 +167,11 @@ int main(void)
                 int16_t dError = error - lastError;
 
                 integral_term = (KI * integral) >> 16; // Интегральная составляющая
-                display.showNumberHex((uint16_t)(integral_term>>6),0, false, 4, 0);
                 p_term = KP * error;                   // Пропорциональная
                 d_term = KD * dError;                  // Дифференциальная
                 // Расчет выхода (Q16.16)
                 output = p_term + d_term + integral_term;
+                display.showNumberHex((uint16_t)(d_term>>6),0, false, 4, 0);
                 //display.showNumberHex((uint16_t)(output),0, false, 4, 0);
 #ifdef DEBUG_PID
                 raw_output = output;
