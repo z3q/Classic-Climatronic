@@ -12,6 +12,11 @@
 SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация софтового UART
 #endif
 
+// Коэффициенты ПИД-регулятора (фиксированная точка Q8.8)
+#define KP 0x0060 // 2.0 = 0x0200
+#define KD 0x0080 // 5.0 = 0x0500
+#define KI 0x00a0 // 0.0003 * 65536 ≈ 20 (использовать в расчете как (KI * integral) >> 16) 0,0003/сек точность Q16.16
+
 // Display connection pins (Digital Pins)
 #define CLK 14
 #define DIO 15
@@ -32,11 +37,6 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 
 // размер фильтра аналогового входа
 #define ADC_FILTER_SIZE 3
-
-// Коэффициенты ПИД-регулятора (фиксированная точка Q8.8)
-#define KP 0x0040 // 2.0 = 0x0200
-#define KD 0x0100 // 5.0 = 0x0500
-#define KI 0x0050 // 0.0003 * 65536 ≈ 20 (использовать в расчете как (KI * integral) >> 16) 0,0003/сек точность Q16.16
 
 #define MIN_VALID_TEMP -55     // -55.0°C (минимальная возможная температура для DS18B20)
 #define MAX_VALID_TEMP 80      // 80.0°C (максимальная возможная температура)
@@ -389,10 +389,10 @@ int16_t readDS18B20()
 
     uint8_t lsb = oneWireRead();
     uint8_t msb = oneWireRead();
-    temp = (msb << 8) | lsb;
+   // temp = (msb << 8) | lsb;
 
     // 5. Конвертация и проверка диапазона
-    int16_t converted_temp = (temp << 2) + ((temp & 0x0F) << 2);
+   // int16_t converted_temp = (temp << 2) + ((temp & 0x0F) << 2);
     // int16_t converted_temp = (temp >> 4) * 64 + ((temp & 0x0F) * 4);  // 4 = 64/16
 
     /* if (converted_temp < MIN_VALID_TEMP*64 || converted_temp > MAX_VALID_TEMP*64) {
@@ -409,6 +409,17 @@ int16_t readDS18B20()
           converted_temp = (temp << 2) + ((temp & 0x0F) << 2);
       }
   */
+
+    int16_t raw_temp = (int16_t)(msb << 8 | lsb);
+
+    int16_t converted_temp;
+    if (raw_temp & 0x8000) { // Отрицательная температура
+        raw_temp = ~raw_temp + 1; // Дополнение до двух
+        converted_temp = -((raw_temp >> 4) * 64 + ((raw_temp & 0x0F) * 4));
+    } else {
+        converted_temp = (raw_temp >> 4) * 64 + ((raw_temp & 0x0F) * 4);
+    }
+
     //   if (converted_temp < (MIN_VALID_TEMP << 6) || converted_temp > (MAX_VALID_TEMP << 6)) {
     //       return TEMP_READ_ERROR; // Например, 0x8000
     //   }
