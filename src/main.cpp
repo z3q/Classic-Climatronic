@@ -31,12 +31,12 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 #define SETPOINT_ADC_IN INCH_4
 
 // размер фильтра аналогового входа
-#define ADC_FILTER_SIZE 5
+#define ADC_FILTER_SIZE 3
 
 // Коэффициенты ПИД-регулятора (фиксированная точка Q8.8)
-#define KP 0x0020 // 2.0 = 0x0200
-#define KD 0x0080 // 5.0 = 0x0500
-#define KI 0x0040 // 0.0003 * 65536 ≈ 20 (использовать в расчете как (KI * integral) >> 16) 0,0003/сек точность Q16.16
+#define KP 0x0040 // 2.0 = 0x0200
+#define KD 0x0100 // 5.0 = 0x0500
+#define KI 0x0050 // 0.0003 * 65536 ≈ 20 (использовать в расчете как (KI * integral) >> 16) 0,0003/сек точность Q16.16
 
 #define MIN_VALID_TEMP -55     // -55.0°C (минимальная возможная температура для DS18B20)
 #define MAX_VALID_TEMP 80      // 80.0°C (максимальная возможная температура)
@@ -55,8 +55,8 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 
 // Интервалы (в циклах таймера)
 #define PWM_FREQ 47                 // Частота ШИМ (Гц) 12000/PWM_MAX
-#define PD_UPDATE_INTERVAL PWM_FREQ // Обновление ПД каждую 1 сек (в периодах ШИМ)
-#define TEMP_MEASURE_INTERVAL 10    // Измерение температуры каждые 30 сек (в PD_UPDATE_INTERVAL)
+#define PD_UPDATE_INTERVAL PWM_FREQ // Обновление ПИ каждую 1 сек (в периодах ШИМ)
+#define TEMP_MEASURE_INTERVAL 30    // Измерение температуры каждые 30 сек (в PD_UPDATE_INTERVAL)
 
 // Глобальные переменные
 volatile uint16_t adcBuffer[ADC_FILTER_SIZE]; // буфер значений АЦП
