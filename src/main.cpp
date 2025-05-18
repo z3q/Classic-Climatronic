@@ -31,16 +31,16 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 #define SETPOINT_ADC_IN INCH_4
 
 // размер фильтра аналогового входа
-#define ADC_FILTER_SIZE 8
+#define ADC_FILTER_SIZE 5
 
 // Коэффициенты ПИД-регулятора (фиксированная точка Q8.8)
 #define KP 0x0020 // 2.0 = 0x0200
-#define KD 0x0100 // 5.0 = 0x0500
-#define KI 0x2000 // 0.0003 * 65536 ≈ 20 (использовать в расчете как (KI * integral) >> 16) 0,0003/сек точность Q16.16
+#define KD 0x0080 // 5.0 = 0x0500
+#define KI 0x0040 // 0.0003 * 65536 ≈ 20 (использовать в расчете как (KI * integral) >> 16) 0,0003/сек точность Q16.16
 
-#define MIN_VALID_TEMP -550  // -55.0°C (минимальная возможная температура для DS18B20)
-#define MAX_VALID_TEMP 800   // 80.0°C (максимальная возможная температура)
-#define TEMP_READ_ERROR 2000 // Значение при ошибке чтения
+#define MIN_VALID_TEMP -55     // -55.0°C (минимальная возможная температура для DS18B20)
+#define MAX_VALID_TEMP 80      // 80.0°C (максимальная возможная температура)
+#define TEMP_READ_ERROR 0x2000 // Значение при ошибке чтения
 
 #define SETPOINT_MIN_Q6 1472  // (16.0 * 64)  = 1024 (16.0°C в Q10.6) минимальная уставка // 22*64 = 1472 для отладки в жару
 #define SETPOINT_RANGE_Q6 600 // (9.375 * 64)  = 600 (9.375°C в Q10.6) диапазон уставки
@@ -61,8 +61,8 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 // Глобальные переменные
 volatile uint16_t adcBuffer[ADC_FILTER_SIZE]; // буфер значений АЦП
 volatile uint8_t adcIndex = 0;                // счётчик измерений
-volatile uint16_t setpoint = 0;
-volatile uint16_t temperature = 0;
+volatile int16_t setpoint = 0;                // уставка
+volatile int16_t temperature = 0;
 volatile int32_t integral = 0; // Накопленная интегральная сумма (Q16.16)
 volatile int16_t lastError = 0;
 volatile uint16_t pwmValue = 0;
@@ -70,7 +70,9 @@ volatile uint16_t pwmCounter = 0;
 volatile uint16_t updateCounter = 0;
 volatile uint8_t measureFlag = 0;
 volatile uint8_t updateFlag = 0;
-volatile int16_t lastADC = 0; // последнее значение АЦП - нужно для детектирования изменения уставки
+volatile uint16_t lastADC = 0;        // последнее значение АЦП - нужно для детектирования изменения уставки
+volatile int16_t lastTemperature = 0; // последнее значение температуры
+int32_t d_term = 0;                   // Дифференциальная составляющая
 
 TM1637TinyDisplay display(CLK, DIO);
 
@@ -81,7 +83,7 @@ void initPWM();
 void initADC();
 uint16_t readADC();
 uint16_t readFilteredADC();
-uint16_t readDS18B20();
+int16_t readDS18B20();
 void oneWireReset();
 void oneWireWrite(uint8_t data);
 uint8_t oneWireRead();
@@ -104,6 +106,14 @@ int main(void)
     measureFlag = 1;
     while (1)
     {
+        int32_t output = 0;
+#ifdef DEBUG_PID
+        int32_t raw_output = 0;
+#endif
+        int16_t error = 0;         // Ошибка
+        int32_t integral_term = 0; // Интегральная составляющая
+        int32_t p_term = 0;        // Пропорциональная составляющая
+
         if (measureFlag)
         {
             measureFlag = 0;
@@ -111,6 +121,10 @@ int main(void)
             // display.clear();
             if (temperature != TEMP_READ_ERROR)
             {
+                // Расчет производной ошибки (dError/dt). уставка считается константой => расчёт по изменению температуры
+                int16_t dError = lastTemperature - temperature;
+                lastTemperature = temperature;
+                d_term = KD * dError; // Дифференциальная составляющая
                 display.setBrightness(BRIGHT_2);
                 display.showNumber((int)(temperature >> 6), false, 2, 2);
             }
@@ -119,14 +133,6 @@ int main(void)
         if (updateFlag)
         {
             updateFlag = 0;
-            int32_t output = 0;
-#ifdef DEBUG_PID
-            int32_t raw_output = 0;
-#endif
-            int16_t error = 0;         // Ошибка
-            int32_t integral_term = 0; // Интегральная составляющая
-            int32_t p_term = 0;        // Пропорциональная составляющая
-            int32_t d_term = 0;        // Дифференциальная составляющая
 
             // Чтение уставки (0-1023 -> 160-250, фиксированная точка 10.6)
             uint16_t adcValue = readFilteredADC();
@@ -149,8 +155,8 @@ int main(void)
 
                 // Расчет setpoint с масштабированием на новый диапазон АЦП (100-923 → 0-823) // 16.0-25.3°C
                 setpoint = SETPOINT_MIN_Q6 + (scaledValue + (ADC_WORKZONE >> 1)) / ADC_WORKZONE;
-                //display.showNumber((int)(setpoint >> 6), false, 2, 0); // Показать значение уставки
-                
+                display.showNumber((int)(setpoint >> 6), false, 2, 0); // Показать значение уставки
+
                 // setpoint = SETPOINT_MIN_Q6 + (uint32_t)(adjustedValue * SETPOINT_RANGE_Q6) / (ADC_DEADZONE_HIGH - ADC_DEADZONE_LOW);
 
                 // Расчет ошибки (фиксированная точка 10.6)
@@ -163,16 +169,13 @@ int main(void)
                 if (integral < -52428800)
                     integral = -52428800;
 
-                // Расчет производной ошибки (dError/dt)
-                int16_t dError = error - lastError;
-
                 integral_term = (KI * integral) >> 16; // Интегральная составляющая
-                p_term = KP * error;                   // Пропорциональная
-                d_term = KD * dError;                  // Дифференциальная
+                p_term = KP * error;                   // Пропорциональная составляющая
+
                 // Расчет выхода (Q16.16)
                 output = p_term + d_term + integral_term;
-                display.showNumberHex((uint16_t)(d_term>>6),0, false, 4, 0);
-                //display.showNumberHex((uint16_t)(output),0, false, 4, 0);
+                display.showNumberHex((uint16_t)(output >> 6), 0, false, 2, 2);
+                // display.showNumberHex((uint16_t)(output),0, false, 4, 0);
 #ifdef DEBUG_PID
                 raw_output = output;
 #endif
@@ -336,7 +339,7 @@ uint8_t oneWireRead()
     return data;
 }
 
-uint16_t readDS18B20()
+int16_t readDS18B20()
 {
     uint16_t temp = TEMP_READ_ERROR;
     uint8_t presence = 0;
@@ -396,7 +399,20 @@ uint16_t readDS18B20()
         return TEMP_READ_ERROR;
      }
      */
-    return (uint16_t)converted_temp;
+    /*  int16_t raw_temp = (int16_t)((msb << 8 )| lsb); // Важно: знаковый тип!
+
+      int16_t converted_temp;
+      if (raw_temp & 0x8000) { // Отрицательная температура
+          raw_temp = ~raw_temp + 1; // Дополнение до двух
+          converted_temp = -((temp << 2) + ((temp & 0x0F) << 2));
+      } else {
+          converted_temp = (temp << 2) + ((temp & 0x0F) << 2);
+      }
+  */
+    //   if (converted_temp < (MIN_VALID_TEMP << 6) || converted_temp > (MAX_VALID_TEMP << 6)) {
+    //       return TEMP_READ_ERROR; // Например, 0x8000
+    //   }
+    return converted_temp; // Возвращаем знаковое число
 }
 
 #ifdef DEBUG_PID
