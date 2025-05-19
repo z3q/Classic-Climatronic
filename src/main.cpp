@@ -342,7 +342,9 @@ uint8_t oneWireRead()
 int16_t readDS18B20()
 {
     uint16_t temp = TEMP_READ_ERROR;
-    uint8_t presence = 0;
+    uint8_t absence = 1; // отсутствие датчика
+    uint32_t timeout = 0;
+    const uint32_t CONVERSION_TIMEOUT_CYCLES = 750000; // Для 1MHz ~750ms
 
     // 1. Reset и проверка присутствия
     DS18B20_PIN_DIR |= DS18B20_PIN;
@@ -350,10 +352,10 @@ int16_t readDS18B20()
     __delay_cycles(480); // Reset pulse (минимум 480 мкс)
     DS18B20_PIN_DIR &= ~DS18B20_PIN;
     __delay_cycles(70); // Ожидание presence pulse (15-60 мкс)
-    presence = !(DS18B20_PIN_IN & DS18B20_PIN);
+    absence = (DS18B20_PIN_IN & DS18B20_PIN);
     __delay_cycles(410); // Завершение тайминга reset
 
-    if (!presence)
+    if (absence)
     { // No sensor connected
         return TEMP_READ_ERROR;
     }
@@ -363,9 +365,6 @@ int16_t readDS18B20()
     oneWireWrite(0x44); // Convert T
 
     // 3. Ожидание завершения с таймаутом (~750ms)
-    uint32_t timeout = 0;
-#define CONVERSION_TIMEOUT_CYCLES 750000 // Для 1MHz ~750ms
-
     while (timeout++ < CONVERSION_TIMEOUT_CYCLES)
     {
         __delay_cycles(1000); // Проверяем каждые 1ms
@@ -389,40 +388,27 @@ int16_t readDS18B20()
 
     uint8_t lsb = oneWireRead();
     uint8_t msb = oneWireRead();
-   // temp = (msb << 8) | lsb;
-
-    // 5. Конвертация и проверка диапазона
-   // int16_t converted_temp = (temp << 2) + ((temp & 0x0F) << 2);
-    // int16_t converted_temp = (temp >> 4) * 64 + ((temp & 0x0F) * 4);  // 4 = 64/16
-
-    /* if (converted_temp < MIN_VALID_TEMP*64 || converted_temp > MAX_VALID_TEMP*64) {
-        return TEMP_READ_ERROR;
-     }
-     */
-    /*  int16_t raw_temp = (int16_t)((msb << 8 )| lsb); // Важно: знаковый тип!
-
-      int16_t converted_temp;
-      if (raw_temp & 0x8000) { // Отрицательная температура
-          raw_temp = ~raw_temp + 1; // Дополнение до двух
-          converted_temp = -((temp << 2) + ((temp & 0x0F) << 2));
-      } else {
-          converted_temp = (temp << 2) + ((temp & 0x0F) << 2);
-      }
-  */
-
     int16_t raw_temp = (int16_t)(msb << 8 | lsb);
 
-    int16_t converted_temp;
-    if (raw_temp & 0x8000) { // Отрицательная температура
-        raw_temp = ~raw_temp + 1; // Дополнение до двух
-        converted_temp = -((raw_temp >> 4) * 64 + ((raw_temp & 0x0F) * 4));
-    } else {
-        converted_temp = (raw_temp >> 4) * 64 + ((raw_temp & 0x0F) * 4);
+    int16_t integerPart = raw_temp >> 4;                            // Знаковая целая часть
+    uint8_t fractionalPart = raw_temp & 0x0F;                       // Дробная часть
+    int16_t converted_temp = integerPart * 64 + fractionalPart * 4; // Q6
+                                                                    /*
+                                                                        int16_t converted_temp;
+                                                                        if (raw_temp & 0x8000)
+                                                                        {                             // Отрицательная температура
+                                                                            raw_temp = ~raw_temp + 1; // Дополнение до двух
+                                                                            converted_temp = -((raw_temp >> 4) * 64 + ((raw_temp & 0x0F) * 4));
+                                                                        }
+                                                                        else
+                                                                        {
+                                                                            converted_temp = (raw_temp >> 4) * 64 + ((raw_temp & 0x0F) * 4);
+                                                                        }
+                                                                    */
+    if (converted_temp < MIN_VALID_TEMP * 64 || converted_temp > MAX_VALID_TEMP * 64)
+    {
+        return TEMP_READ_ERROR;
     }
-
-    //   if (converted_temp < (MIN_VALID_TEMP << 6) || converted_temp > (MAX_VALID_TEMP << 6)) {
-    //       return TEMP_READ_ERROR; // Например, 0x8000
-    //   }
     return converted_temp; // Возвращаем знаковое число
 }
 
