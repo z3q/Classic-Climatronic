@@ -70,9 +70,12 @@ volatile uint16_t pwmCounter = 0;
 volatile uint16_t updateCounter = 0;
 volatile uint8_t measureFlag = 0;
 volatile uint8_t updateFlag = 0;
-volatile uint16_t lastADC = 0;        // последнее значение АЦП - нужно для детектирования изменения уставки
-volatile int16_t lastTemperature = 0; // последнее значение температуры
-int32_t d_term = 0;                   // Дифференциальная составляющая
+volatile uint16_t lastADC = 0;                         // последнее значение АЦП - нужно для детектирования изменения уставки
+volatile int16_t lastTemperature = 0;                  // последнее значение температуры
+volatile int32_t d_term = 0;                           // Дифференциальная составляющая
+volatile int32_t d_term_buffer[ADC_FILTER_SIZE] = {0}; // Буфер значений d_term
+volatile uint8_t d_term_index = 0;                     // Индекс буфера
+volatile int32_t filtered_d_term = 0;                  // Отфильтрованное значение
 
 TM1637TinyDisplay display(CLK, DIO);
 
@@ -125,6 +128,18 @@ int main(void)
                 int16_t dError = lastTemperature - temperature;
                 lastTemperature = temperature;
                 d_term = KD * dError; // Дифференциальная составляющая
+                // Обновление буфера и фильтрация
+                d_term_buffer[d_term_index] = d_term;
+                d_term_index = (d_term_index + 1) % ADC_FILTER_SIZE;
+
+                // Расчет среднего значения
+                int32_t sum_d = 0;
+                for (uint8_t i = 0; i < ADC_FILTER_SIZE; i++)
+                {
+                    sum_d += d_term_buffer[i];
+                }
+                filtered_d_term = sum_d / ADC_FILTER_SIZE;
+
                 display.setBrightness(BRIGHT_2);
                 display.showNumber((int)(temperature >> 6), false, 2, 2);
             }
@@ -173,20 +188,29 @@ int main(void)
                 p_term = KP * error;                   // Пропорциональная составляющая
 
                 // Расчет выхода (Q16.16)
-                output = p_term + d_term + integral_term;
-                display.showNumberHex((uint16_t)(output >> 6), 0, false, 2, 2);
-                // display.showNumberHex((uint16_t)(output),0, false, 4, 0);
+                output = p_term + filtered_d_term + integral_term;
+                // display.showNumberHex((uint16_t)(output >> 6), 0, false, 2, 2);
+
 #ifdef DEBUG_PID
                 raw_output = output;
 #endif
 
-                // Масштабирование и ограничение выхода
+                // Масштабирование и ограничение выхода, предотвращение насыщения интеграла
                 output >>= 6;
+                display.showNumberHex((uint16_t)(output), 0, false, 2, 2);
                 if (output < PWM_MIN)
+                {
                     output = PWM_MIN;
+                    if (error < 0)
+                        integral -= error; // Уменьшаем интеграл при отрицательной ошибке
+                }
                 if (output > PWM_MAX)
+                {
                     output = PWM_MAX;
-                lastError = error;
+                    if (error > 0)
+                        integral -= error; // Уменьшаем интеграл при положительной ошибке
+                }
+                // lastError = error;
             }
 
             // Установка ШИМ
@@ -237,9 +261,9 @@ void initGPIO()
 // Инициализация ШИМ и таймера
 void initPWM()
 {
-    TA0CCR0 = PWM_MAX;                // (125000 / PWM_FREQ) - 1; // Период ШИМ (488 Гц)
+    TA0CCR0 = PWM_MAX;                // (125000 / PWM_FREQ) - 1; // Период ШИМ (47 Гц)
     TA0CCTL1 = OUTMOD_7;              // Режим Reset/Set
-    TA0CCR1 = 0;                      // Начальная скважность 0%
+    TA0CCR1 = 0;                      // Начальный КЗИ 0%
     TA0CCTL0 = CCIE;                  // Разрешить прерывания по CCR0
     TA0CTL = TASSEL_1 + MC_1 + TACLR; // ACLK, счет вверх
 }
