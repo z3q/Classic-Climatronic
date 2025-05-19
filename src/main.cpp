@@ -90,6 +90,7 @@ int16_t readDS18B20();
 void oneWireReset();
 void oneWireWrite(uint8_t data);
 uint8_t oneWireRead();
+void showLevel(uint8_t level, uint8_t pos);
 #ifdef DEBUG_PID
 void sendPIDDebug(int16_t error, int32_t p_term, int32_t i_term, int16_t d_term, int32_t output, uint16_t pwm);
 #endif
@@ -140,7 +141,7 @@ int main(void)
                 }
                 filtered_d_term = sum_d / ADC_FILTER_SIZE;
 
-                display.setBrightness(BRIGHT_2);
+                display.setBrightness(BRIGHT_1);
                 display.showNumber((int)(temperature >> 6), false, 2, 2);
             }
         }
@@ -170,8 +171,7 @@ int main(void)
 
                 // Расчет setpoint с масштабированием на новый диапазон АЦП (100-923 → 0-823) // 16.0-25.3°C
                 setpoint = SETPOINT_MIN_Q6 + (scaledValue + (ADC_WORKZONE >> 1)) / ADC_WORKZONE;
-                display.showNumber((int)(setpoint >> 6), false, 2, 0); // Показать значение уставки
-
+                
                 // setpoint = SETPOINT_MIN_Q6 + (uint32_t)(adjustedValue * SETPOINT_RANGE_Q6) / (ADC_DEADZONE_HIGH - ADC_DEADZONE_LOW);
 
                 // Расчет ошибки (фиксированная точка 10.6)
@@ -189,7 +189,7 @@ int main(void)
 
                 // Расчет выхода (Q16.16)
                 output = p_term + filtered_d_term + integral_term;
-                // display.showNumberHex((uint16_t)(output >> 6), 0, false, 2, 2);
+                // display.showNumber((p_term),  false, 4, 0);
 
 #ifdef DEBUG_PID
                 raw_output = output;
@@ -197,7 +197,7 @@ int main(void)
 
                 // Масштабирование и ограничение выхода, предотвращение насыщения интеграла
                 output >>= 6;
-                display.showNumberHex((uint16_t)(output), 0, false, 2, 2);
+                 display.showNumberHex((output),0, false, 4, 0);
                 if (output < PWM_MIN)
                 {
                     output = PWM_MIN;
@@ -217,7 +217,7 @@ int main(void)
             if (temperature == TEMP_READ_ERROR)
             {                                   // Действия при ошибке датчика
                 pwmValue = adcValue >> 2;       // прямое управление ШИМ
-                display.showString("Er", 2, 2); // показать ошибку
+                display.showString("Er", 2, 0); // показать ошибку
             }
             else
             {
@@ -230,13 +230,18 @@ int main(void)
                 }
             }
             // display.showNumberHex(pwmValue, 0, false, 2, 0);    // Показать значение ШИМ
+
+            uint8_t zerosegments[1] = {0};
+           // display.setSegments(zerosegments, 1, 2);
+           // showLevel(pwmValue, 3);
+           //display.showNumber((int)(setpoint >> 6), false, 2, 0); // Показать значение уставки
             TA0CCR1 = pwmValue; // Записать регистр ШИМ
 
 #ifdef DEBUG_PID
             sendPIDDebug(error, p_term, integral_term, d_term, raw_output, pwmValue); // Отправка отладочной информации
 #endif
         }
-        LPM0;
+        LPM3;
     }
 }
 
@@ -296,7 +301,7 @@ __interrupt void Timer0_A0_ISR(void)
             measureFlag = 1;
         }
     }
-    LPM0_EXIT;
+    LPM3_EXIT;
 }
 
 // Чтение АЦП
@@ -434,6 +439,34 @@ int16_t readDS18B20()
         return TEMP_READ_ERROR;
     }
     return converted_temp; // Возвращаем знаковое число
+}
+
+void showLevel(uint8_t level, uint8_t pos)
+{
+    uint8_t digits[1] = {0};
+    // Must fit within 4 bars
+    int bars = (int)(((level * 4) / 256) + 1);
+    if (level == 0)
+        bars = 0;
+    switch (bars)
+    {
+    case 1:
+        digits[0] = 0b10000000;
+        break;
+    case 2:
+        digits[0] = 0b10001000;
+        break;
+    case 3:
+        digits[0] = 0b11001000;
+        break;
+    case 4:
+        digits[0] = 0b11001001;
+        break;
+    default: // Keep at zero
+        break;
+    }
+
+    display.setSegments(digits, 1, pos);
 }
 
 #ifdef DEBUG_PID
