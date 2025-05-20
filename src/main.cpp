@@ -76,6 +76,8 @@ volatile int32_t d_term = 0;                           // Дифференциа
 volatile int32_t d_term_buffer[ADC_FILTER_SIZE] = {0}; // Буфер значений d_term
 volatile uint8_t d_term_index = 0;                     // Индекс буфера
 volatile int32_t filtered_d_term = 0;                  // Отфильтрованное значение
+const int32_t INTEGRAL_MIN = -2147450879;              // минимальное безопасное значение интеграла
+const int32_t INTEGRAL_MAX = 2147450879;               // максимальное безопасное значение интеграла
 
 TM1637TinyDisplay display(CLK, DIO);
 
@@ -128,7 +130,7 @@ int main(void)
                 // Расчет производной ошибки (dError/dt). уставка считается константой => расчёт по изменению температуры
                 int16_t dError = lastTemperature - temperature;
                 lastTemperature = temperature;
-                d_term = KD * dError; // Дифференциальная составляющая
+                d_term = (int32_t)KD * (int32_t)dError; // Дифференциальная составляющая
                 // Обновление буфера и фильтрация
                 d_term_buffer[d_term_index] = d_term;
                 d_term_index = (d_term_index + 1) % ADC_FILTER_SIZE;
@@ -171,7 +173,7 @@ int main(void)
 
                 // Расчет setpoint с масштабированием на новый диапазон АЦП (100-923 → 0-823) // 16.0-25.3°C
                 setpoint = SETPOINT_MIN_Q6 + (scaledValue + (ADC_WORKZONE >> 1)) / ADC_WORKZONE;
-                
+
                 // setpoint = SETPOINT_MIN_Q6 + (uint32_t)(adjustedValue * SETPOINT_RANGE_Q6) / (ADC_DEADZONE_HIGH - ADC_DEADZONE_LOW);
 
                 // Расчет ошибки (фиксированная точка 10.6)
@@ -179,13 +181,13 @@ int main(void)
 
                 // Интегральная составляющая (с насыщением)
                 integral += error;
-                if (integral > 52428800)
-                    integral = 52428800; // Ограничение
-                if (integral < -52428800)
-                    integral = -52428800;
+                if (integral > INTEGRAL_MAX)
+                    integral = INTEGRAL_MAX; // Ограничение
+                if (integral < INTEGRAL_MIN)
+                    integral = INTEGRAL_MIN;
 
                 integral_term = (KI * integral) >> 16; // Интегральная составляющая
-                p_term = KP * error;                   // Пропорциональная составляющая
+                p_term = (int32_t)KP * (int32_t)error; // Пропорциональная составляющая
 
                 // Расчет выхода (Q16.16)
                 output = p_term + filtered_d_term + integral_term;
@@ -197,7 +199,7 @@ int main(void)
 
                 // Масштабирование и ограничение выхода, предотвращение насыщения интеграла
                 output >>= 6;
-                 display.showNumberHex((output),0, false, 4, 0);
+                display.showNumberHex((output), 0, false, 4, 0);
                 if (output < PWM_MIN)
                 {
                     output = PWM_MIN;
@@ -232,9 +234,9 @@ int main(void)
             // display.showNumberHex(pwmValue, 0, false, 2, 0);    // Показать значение ШИМ
 
             uint8_t zerosegments[1] = {0};
-           // display.setSegments(zerosegments, 1, 2);
-           // showLevel(pwmValue, 3);
-           //display.showNumber((int)(setpoint >> 6), false, 2, 0); // Показать значение уставки
+            // display.setSegments(zerosegments, 1, 2);
+            // showLevel(pwmValue, 3);
+            // display.showNumber((int)(setpoint >> 6), false, 2, 0); // Показать значение уставки
             TA0CCR1 = pwmValue; // Записать регистр ШИМ
 
 #ifdef DEBUG_PID
