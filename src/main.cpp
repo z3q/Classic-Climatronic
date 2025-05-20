@@ -117,7 +117,9 @@ int main(void)
 
         if (measureFlag)
         {
+            __disable_interrupt();
             measureFlag = 0;
+            __enable_interrupt();
             temperature = readDS18B20();
 
             if (temperature != TEMP_READ_ERROR)
@@ -138,8 +140,9 @@ int main(void)
 
         if (updateFlag)
         {
+            __disable_interrupt();
             updateFlag = 0;
-
+            __enable_interrupt();
             // Чтение уставки (0-1023 -> 160-250, фиксированная точка 10.6)
             adcValue = (adcValue + readADC()) >> 1; // Безопасно, так как значение АЦП 10-битное
 
@@ -147,7 +150,9 @@ int main(void)
             if (abs((int)adcValue - (int)lastADC) > 40)
             {
                 display.setBrightness(BRIGHT_HIGH);
-                updateCounter = 0;  // Отложить измерение на 30 секунд, чтобы показать уставку с максимальной яркостью
+                __disable_interrupt();
+                updateCounter = 0; // Отложить измерение на 30 секунд, чтобы показать уставку с максимальной яркостью
+                __enable_interrupt();
                 lastADC = adcValue; // Запомнить уставку для следующего сравнения
             }
 
