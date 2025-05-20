@@ -42,7 +42,7 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 #define MAX_VALID_TEMP 80      // 80.0°C (максимальная возможная температура)
 #define TEMP_READ_ERROR 0x2000 // Значение при ошибке чтения
 
-#define SETPOINT_MIN_Q6 1472  // (16.0 * 64)  = 1024 (16.0°C в Q10.6) минимальная уставка // 22*64 = 1472 для отладки в жару
+#define SETPOINT_MIN_Q6 1024  // (16.0 * 64)  = 1024 (16.0°C в Q10.6) минимальная уставка // 22*64 = 1472 для отладки в жару
 #define SETPOINT_RANGE_Q6 600 // (9.375 * 64)  = 600 (9.375°C в Q10.6) диапазон уставки
 
 #define ADC_DEADZONE_LOW 100  // Нижняя граница "мертвой зоны" АЦП
@@ -173,7 +173,7 @@ int main(void)
 
                 // Расчет уставки с масштабированием на новый диапазон АЦП (100-923 → 0-823) // 16.0-25.3°C
                 setpoint = SETPOINT_MIN_Q6 + (scaledValue + (ADC_WORKZONE >> 1)) / ADC_WORKZONE;
-                // display.showNumber((int)(setpoint >> 6), false, 2, 0); // Показать значение уставки
+                display.showNumber((int)(setpoint >> 6), false, 2, 0); // Показать значение уставки
 
                 // Установка ШИМ
                 if (temperature == TEMP_READ_ERROR)
@@ -208,7 +208,7 @@ int main(void)
                     output >>= 6;
 
                     // отладка
-                    display.showNumberHex((output), 0, false, 4, 0);
+                    // display.showNumberHex((output), 0, false, 4, 0);
 
                     if (output < PWM_MIN)
                     {
@@ -227,8 +227,8 @@ int main(void)
 
             pwmValue = (uint16_t)output;
             uint8_t zerosegments[1] = {0};
-            // display.setSegments(zerosegments, 1, 2);
-            // showLevel(pwmValue, 3);
+            display.setSegments(zerosegments, 1, 2);
+            showLevel(pwmValue, 3);
             // display.showNumberHex(pwmValue, 0, false, 2, 0);    // Показать значение ШИМ
             TA0CCR1 = pwmValue; // Записать регистр ШИМ
 
@@ -318,7 +318,7 @@ uint16_t readADC()
     return sum / ADC_FILTER_SIZE;
 }
 */
-// Функции работы с DS18B20 
+// Функции работы с DS18B20
 void oneWireReset()
 {
     DS18B20_PIN_DIR |= DS18B20_PIN;
