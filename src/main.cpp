@@ -15,7 +15,7 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 // Коэффициенты ПИД-регулятора (фиксированная точка Q8.8)
 #define KP 0x0060 // пропорциональнай коэффициент
 #define KD 0x0080 // дифференциальный коэффицинет
-#define KI 0x00c0 // интегральный коэффициент (использовать в расчете как (KI * integral) >> 16) 0,0003/сек точность Q16.16
+#define KI 0x00d0 // интегральный коэффициент (использовать в расчете как (KI * integral) >> 16) 0,0003/сек точность Q16.16
 
 // Display connection pins (Digital Pins)
 #define CLK 14
@@ -34,9 +34,6 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 
 // Пин для аналогового входа (P1.4 - A4)
 #define SETPOINT_ADC_IN INCH_4
-
-// размер фильтра аналогового входа
-#define ADC_FILTER_SIZE 3
 
 #define MIN_VALID_TEMP -55     // -55.0°C (минимальная возможная температура для DS18B20)
 #define MAX_VALID_TEMP 80      // 80.0°C (максимальная возможная температура)
