@@ -17,9 +17,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-        # Создаем архив исходников
-      - name: Create source code archive
-        run: git archive --format=zip -o source-code.zip HEAD
+        # Создаем архив исходников - при публикации из черновика добавится автоматически
+     # - name: Create source code archive
+     #   run: git archive --format=zip -o source-code.zip HEAD
 
       - name: Install PlatformIO Core
         run: |
@@ -41,6 +41,6 @@ jobs:
           name: "Release ${{ steps.get-tag.outputs.date}} (Build ${{ steps.get-tag.outputs.tag }})"
           files: |
             .pio/build/**/*.hex
-            source-code.zip
+          #  source-code.zip
           draft: true
           prerelease: true
