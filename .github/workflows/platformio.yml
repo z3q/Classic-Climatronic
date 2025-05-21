@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install PlatformIO
-        uses: platformio/action-install-platformio@v2
+        uses: platformio/action-install-platformio@v3
 
       - name: Build Project
         run: pio run
