@@ -10,6 +10,8 @@ jobs:
   build:
     name: Build Project
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Требуется для создания релиза
 
     steps:
       - name: Checkout code
@@ -21,3 +23,18 @@ jobs:
           
       - name: Build Project
         run: pio run
+     
+      - name: Get current date and run ID
+        id: get-tag
+        run: |
+          echo "date=$(date -u +'%Y.%m.%d')" >> $GITHUB_OUTPUT
+          echo "tag=${{ github.run_id }}" >> $GITHUB_OUTPUT  # Уникальный ID запуска
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: "${{ steps.get-tag.outputs.date }}.${{ steps.get-tag.outputs.tag }}"
+          name: "Release ${{ steps.get-tag.outputs.date}} (Build ${{ steps.get-tag.outputs.tag }})"
+          files: .pio/build/**/*.hex
+          draft: true
+          prerelease: true
