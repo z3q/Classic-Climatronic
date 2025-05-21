@@ -81,7 +81,6 @@ void initGPIO();
 void initPWM();
 void initADC();
 uint16_t readADC();
-uint16_t readFilteredADC();
 int16_t readDS18B20();
 void oneWireReset();
 void oneWireWrite(uint8_t data);
@@ -100,6 +99,7 @@ int main(void)
     initPWM();
     initADC();
     display.clear();
+    lastTemperature = readDS18B20(); // для правильной работы ПИД сразу после запуска
     __enable_interrupt();
 
     // Первое измерение температуры сразу
@@ -119,8 +119,8 @@ int main(void)
         {
             __disable_interrupt();
             measureFlag = 0;
-            __enable_interrupt();
             temperature = readDS18B20();
+            __enable_interrupt();
 
             if (temperature != TEMP_READ_ERROR)
             {
@@ -146,7 +146,7 @@ int main(void)
             // Чтение уставки (0-1023 -> 160-250, фиксированная точка 10.6)
             adcValue = (adcValue + readADC()) >> 1; // Безопасно, так как значение АЦП 10-битное
 
-            // Если поменяли уставку, увеличить яркость
+            // Если поменяли уставку, увеличить яркость и отложить измерение температуры, совмещённое с понижением яркости
             if (abs((int)adcValue - (int)lastADC) > 40)
             {
                 display.setBrightness(BRIGHT_HIGH);
@@ -310,16 +310,6 @@ uint16_t readADC()
     return ADC10MEM;
 }
 
-/*uint16_t readFilteredADC()
-{
-    adcBuffer[adcIndex] = readADC();
-    adcIndex = (adcIndex + 1) % ADC_FILTER_SIZE;
-    uint32_t sum = 0;
-    for (uint8_t i = 0; i < ADC_FILTER_SIZE; i++)
-        sum += adcBuffer[i];
-    return sum / ADC_FILTER_SIZE;
-}
-*/
 // Функции работы с DS18B20
 void oneWireReset()
 {
