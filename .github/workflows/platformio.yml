@@ -15,8 +15,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install PlatformIO
-        uses: platformio/action-install-platformio@v3
-
+      - name: Install PlatformIO Core
+        run: |
+          pip install --upgrade platformio
+          
       - name: Build Project
         run: pio run
