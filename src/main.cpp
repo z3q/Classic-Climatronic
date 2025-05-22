@@ -13,9 +13,9 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 #endif
 
 // Коэффициенты ПИД-регулятора (фиксированная точка Q8.8)
-#define KP 0x0060 // 2.0 = 0x0200
-#define KD 0x0080 // 5.0 = 0x0500
-#define KI 0x00a0 // 0.0003 * 65536 ≈ 20 (использовать в расчете как (KI * integral) >> 16) 0,0003/сек точность Q16.16
+#define KP 0x0060 // пропорциональнай коэффициент
+#define KD 0x0080 // дифференциальный коэффицинет
+#define KI 0x00d0 // интегральный коэффициент (использовать в расчете как (KI * integral) >> 16) 0,0003/сек точность Q16.16
 
 // Display connection pins (Digital Pins)
 #define CLK 14
@@ -79,7 +79,7 @@ volatile int32_t filtered_d_term = 0;                  // Отфильтрова
 const int32_t INTEGRAL_MIN = -2147450879;              // минимальное безопасное значение интеграла
 const int32_t INTEGRAL_MAX = 2147450879;               // максимальное безопасное значение интеграла
 
-TM1637TinyDisplay display(CLK, DIO);
+TM1637TinyDisplay display(CLK, DIO); // 4-разрядный 7-сегментный дисплей с точками
 
 // Прототипы функций
 void initClock();
@@ -105,6 +105,7 @@ int main(void)
     initGPIO();
     initPWM();
     initADC();
+    display.clear();
 
     __enable_interrupt();
 
@@ -124,7 +125,7 @@ int main(void)
         {
             measureFlag = 0;
             temperature = readDS18B20();
-            // display.clear();
+
             if (temperature != TEMP_READ_ERROR)
             {
                 // Расчет производной ошибки (dError/dt). уставка считается константой => расчёт по изменению температуры
@@ -146,6 +147,11 @@ int main(void)
                 display.setBrightness(BRIGHT_1);
                 display.showNumber((int)(temperature >> 6), false, 2, 2);
             }
+            else
+            {
+                display.showString("Er", 2, 2); // показать ошибку
+            }
+            display.setBrightness(BRIGHT_1);
         }
 
         if (updateFlag)
@@ -155,6 +161,7 @@ int main(void)
             // Чтение уставки (0-1023 -> 160-250, фиксированная точка 10.6)
             uint16_t adcValue = readFilteredADC();
 
+            // Проверка крайних положений задающего органа
             if (adcValue <= ADC_DEADZONE_LOW)
             {
                 output = PWM_MIN;               // 0%
@@ -171,8 +178,9 @@ int main(void)
                 uint16_t adjustedValue = adcValue - ADC_DEADZONE_LOW;
                 uint32_t scaledValue = (uint32_t)adjustedValue * SETPOINT_RANGE_Q6;
 
-                // Расчет setpoint с масштабированием на новый диапазон АЦП (100-923 → 0-823) // 16.0-25.3°C
+                // Расчет уставки с масштабированием на новый диапазон АЦП (100-923 → 0-823) // 16.0-25.3°C
                 setpoint = SETPOINT_MIN_Q6 + (scaledValue + (ADC_WORKZONE >> 1)) / ADC_WORKZONE;
+                display.showNumber((int)(setpoint >> 6), false, 2, 0); // Показать значение уставки
 
                 // setpoint = SETPOINT_MIN_Q6 + (uint32_t)(adjustedValue * SETPOINT_RANGE_Q6) / (ADC_DEADZONE_HIGH - ADC_DEADZONE_LOW);
 
@@ -199,7 +207,10 @@ int main(void)
 
                 // Масштабирование и ограничение выхода, предотвращение насыщения интеграла
                 output >>= 6;
-                display.showNumberHex((output), 0, false, 4, 0);
+
+                // отладка
+                // display.showNumberHex((output), 0, false, 4, 0);
+
                 if (output < PWM_MIN)
                 {
                     output = PWM_MIN;
@@ -212,7 +223,6 @@ int main(void)
                     if (error > 0)
                         integral -= error; // Уменьшаем интеграл при положительной ошибке
                 }
-                // lastError = error;
             }
 
             // Установка ШИМ
@@ -234,8 +244,8 @@ int main(void)
             // display.showNumberHex(pwmValue, 0, false, 2, 0);    // Показать значение ШИМ
 
             uint8_t zerosegments[1] = {0};
-            // display.setSegments(zerosegments, 1, 2);
-            // showLevel(pwmValue, 3);
+            display.setSegments(zerosegments, 1, 2);
+            showLevel(pwmValue, 3);
             // display.showNumber((int)(setpoint >> 6), false, 2, 0); // Показать значение уставки
             TA0CCR1 = pwmValue; // Записать регистр ШИМ
 
@@ -268,7 +278,7 @@ void initGPIO()
 // Инициализация ШИМ и таймера
 void initPWM()
 {
-    TA0CCR0 = PWM_MAX;                // (125000 / PWM_FREQ) - 1; // Период ШИМ (47 Гц)
+    TA0CCR0 = PWM_MAX;                // (12000 / PWM_FREQ) - 1; // Период ШИМ (47 Гц)
     TA0CCTL1 = OUTMOD_7;              // Режим Reset/Set
     TA0CCR1 = 0;                      // Начальный КЗИ 0%
     TA0CCTL0 = CCIE;                  // Разрешить прерывания по CCR0
@@ -325,7 +335,7 @@ uint16_t readFilteredADC()
     return sum / ADC_FILTER_SIZE;
 }
 
-// Функции работы с DS18B20 (остаются без изменений)
+// Функции работы с DS18B20
 void oneWireReset()
 {
     DS18B20_PIN_DIR |= DS18B20_PIN;
