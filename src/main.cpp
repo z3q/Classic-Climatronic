@@ -42,12 +42,12 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 #define MAX_VALID_TEMP 80      // 80.0°C (максимальная возможная температура)
 #define TEMP_READ_ERROR 0x2000 // Значение при ошибке чтения
 
-#define SETPOINT_MIN_Q6 1472  // (16.0 * 64)  = 1024 (16.0°C в Q10.6) минимальная уставка // 22*64 = 1472 для отладки в жару
+#define SETPOINT_MIN_Q6 1472  // (16.0 * 64)  = 1024 (16.0°C в Q10.6) минимальная уставка // 23*64 = 1472 для отладки в жару
 #define SETPOINT_RANGE_Q6 600 // (9.375 * 64)  = 600 (9.375°C в Q10.6) диапазон уставки
 
-#define ADC_DEADZONE_LOW 100  // Нижняя граница "мертвой зоны" АЦП
-#define ADC_DEADZONE_HIGH 923 // Верхняя граница "мертвой зоны" АЦП (1023 - 100)
-#define ADC_WORKZONE 823      // Ширина рабочей зоны АЦП = 923-100
+#define ADC_DEADZONE_LOW 250  // Нижняя граница "мертвой зоны" АЦП
+#define ADC_DEADZONE_HIGH 815 // Верхняя граница "мертвой зоны" АЦП (1023 - 100)
+#define ADC_WORKZONE (ADC_DEADZONE_HIGH - ADC_DEADZONE_LOW)      // Ширина рабочей зоны АЦП = 923-100
 
 // Ограничения ШИМ
 #define PWM_MIN 0
@@ -181,9 +181,9 @@ int main(void)
                 // Расчет уставки с масштабированием на новый диапазон АЦП (100-923 → 0-823) // 16.0-25.3°C
                 setpoint = SETPOINT_MIN_Q6 + (scaledValue + (ADC_WORKZONE >> 1)) / ADC_WORKZONE;
                 display.showNumber((int)(setpoint >> 6), false, 2, 0); // Показать значение уставки
+                //display.showNumberDec((int)(((int32_t)setpoint*10+32) >> 6), 0b01000000, false, 3, 0); // Показать значение уставки
 
-                // setpoint = SETPOINT_MIN_Q6 + (uint32_t)(adjustedValue * SETPOINT_RANGE_Q6) / (ADC_DEADZONE_HIGH - ADC_DEADZONE_LOW);
-
+                
                 // Расчет ошибки (фиксированная точка 10.6)
                 error = setpoint - temperature;
 
@@ -229,7 +229,7 @@ int main(void)
             if (temperature == TEMP_READ_ERROR)
             {                                   // Действия при ошибке датчика
                 pwmValue = adcValue >> 2;       // прямое управление ШИМ
-                display.showString("Er", 2, 0); // показать ошибку
+                //display.showString("Er", 2, 0); // показать ошибку
             }
             else
             {
@@ -434,18 +434,7 @@ int16_t readDS18B20()
     int16_t integerPart = raw_temp >> 4;                            // Знаковая целая часть
     uint8_t fractionalPart = raw_temp & 0x0F;                       // Дробная часть
     int16_t converted_temp = integerPart * 64 + fractionalPart * 4; // Q6
-                                                                    /*
-                                                                        int16_t converted_temp;
-                                                                        if (raw_temp & 0x8000)
-                                                                        {                             // Отрицательная температура
-                                                                            raw_temp = ~raw_temp + 1; // Дополнение до двух
-                                                                            converted_temp = -((raw_temp >> 4) * 64 + ((raw_temp & 0x0F) * 4));
-                                                                        }
-                                                                        else
-                                                                        {
-                                                                            converted_temp = (raw_temp >> 4) * 64 + ((raw_temp & 0x0F) * 4);
-                                                                        }
-                                                                    */
+                                                                   
     if (converted_temp < MIN_VALID_TEMP * 64 || converted_temp > MAX_VALID_TEMP * 64)
     {
         return TEMP_READ_ERROR;
