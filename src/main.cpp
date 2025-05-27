@@ -1,3 +1,22 @@
+
+/*
+    PID thermostat for automotive climate control
+    Copyright (C) 2025 z3q (Kirill A. Vorontsov)
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
 // #define DEBUG_PID  // Закомментировать для финального релиза (отключит UART и отладку)
 
 #include <msp430.h>
@@ -40,12 +59,12 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 #define MAX_VALID_TEMP 80      // 80.0°C (максимальная возможная температура)
 #define TEMP_READ_ERROR 0x2000 // Значение при ошибке чтения
 
-#define SETPOINT_MIN_Q6 1024  // (16.0 * 64)  = 1024 (16.0°C в Q10.6) минимальная уставка // 22*64 = 1472 для отладки в жару
+#define SETPOINT_MIN_Q6 1472  // (16.0 * 64)  = 1024 (16.0°C в Q10.6) минимальная уставка // 23*64 = 1472 для отладки в жару
 #define SETPOINT_RANGE_Q6 600 // (9.375 * 64)  = 600 (9.375°C в Q10.6) диапазон уставки
 
-#define ADC_DEADZONE_LOW 100  // Нижняя граница "мертвой зоны" АЦП
-#define ADC_DEADZONE_HIGH 923 // Верхняя граница "мертвой зоны" АЦП (1023 - 100)
-#define ADC_WORKZONE 823      // Ширина рабочей зоны АЦП = 923-100
+#define ADC_DEADZONE_LOW 250                                // Нижняя граница "мертвой зоны" АЦП
+#define ADC_DEADZONE_HIGH 815                               // Верхняя граница "мертвой зоны" АЦП (1023 - 100)
+#define ADC_WORKZONE (ADC_DEADZONE_HIGH - ADC_DEADZONE_LOW) // Ширина рабочей зоны АЦП = 923-100
 
 // Ограничения ШИМ
 #define PWM_MIN 0
@@ -101,7 +120,7 @@ int main(void)
     initADC();
     display.clear();
 
-    // WDTCTL = WDTPW | WDTCNTCL | WDTSSEL; // Настройка сторожевого таймера на ~2.73 сек - пока только мешает
+
 
     __enable_interrupt();
 
@@ -180,6 +199,7 @@ int main(void)
                 // Расчет уставки с масштабированием на новый диапазон АЦП (100-923 → 0-823) // 16.0-25.3°C
                 setpoint = SETPOINT_MIN_Q6 + (scaledValue + (ADC_WORKZONE >> 1)) / ADC_WORKZONE;
                 display.showNumber((int)(setpoint >> 6), false, 2, 0); // Показать значение уставки
+                // display.showNumberDec((int)(((int32_t)setpoint*10+32) >> 6), 0b01000000, false, 3, 0); // Показать значение уставки
 
                 // Установка ШИМ
                 if (temperature == TEMP_READ_ERROR)
@@ -232,10 +252,8 @@ int main(void)
             }
 
             pwmValue = (uint16_t)output;
-            uint8_t zerosegments[1] = {0};
-            display.setSegments(zerosegments, 1, 2);
+            display.showString(" ", 1, 2);
             showLevel(pwmValue, 3);
-            // display.showNumberHex(pwmValue, 0, false, 2, 0);    // Показать значение ШИМ
             TA0CCR1 = pwmValue; // Записать регистр ШИМ
 
 #ifdef DEBUG_PID
@@ -392,7 +410,7 @@ int16_t readDS18B20()
     uint16_t temp = TEMP_READ_ERROR;
     uint8_t absence = 1; // отсутствие датчика
     uint32_t timeout = 0;
-    const uint32_t CONVERSION_TIMEOUT_CYCLES = 750000; // Для 1MHz ~750ms
+    const uint32_t CONVERSION_TIMEOUT_CYCLES = 850; // Для 1MHz ~750ms
 
     // 1. Reset и проверка присутствия
     DS18B20_PIN_DIR |= DS18B20_PIN;
@@ -425,9 +443,8 @@ int16_t readDS18B20()
         }
         oneWireWrite(0xCC);
         oneWireWrite(0xBE); // Читаем scratchpad
-        uint8_t status = oneWireRead();
-        if (status & 0x01)
-            break; // Преобразование завершено
+        if (oneWireRead())
+            break; // Бит 0 = 1 -> преобразование завершено
     }
 
     if (timeout >= CONVERSION_TIMEOUT_CYCLES)
