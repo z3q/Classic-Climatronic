@@ -42,6 +42,7 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 
 // Пин для датчика DS18B20 (P2.5)
 #define DS18B20_PIN_DIR P2DIR
+#define DS18B20_PIN_REN P2REN
 #define DS18B20_PIN_OUT P2OUT
 #define DS18B20_PIN_IN P2IN
 #define DS18B20_PIN BIT5
@@ -101,7 +102,7 @@ void initPWM();
 void initADC();
 uint16_t readADC();
 int16_t readDS18B20();
-void oneWireReset();
+uint8_t oneWireReset();
 void oneWireWrite(uint8_t data);
 uint8_t oneWireRead();
 void showLevel(uint8_t level, uint8_t pos);
@@ -119,6 +120,8 @@ int main(void)
     initADC();
     display.clear();
 
+
+
     __enable_interrupt();
 
     // Первое измерение температуры сразу
@@ -126,6 +129,7 @@ int main(void)
 
     while (1)
     {
+        // WDTCTL = WDTPW | WDTCNTCL | WDTSSEL; // Сброс счётчика WDT
         int32_t output = 0;
 #ifdef DEBUG_PID
         int32_t raw_output = 0;
@@ -272,8 +276,9 @@ void initClock()
 // Инициализация GPIO
 void initGPIO()
 {
-    DS18B20_PIN_DIR &= ~DS18B20_PIN;
-    DS18B20_PIN_OUT |= DS18B20_PIN;
+    DS18B20_PIN_DIR &= ~DS18B20_PIN; // Настройка пина как входа
+                                     //   DS18B20_PIN_REN |= DS18B20_PIN;  // Включение внутреннего резистора - приводит к неработоспособности шины
+    DS18B20_PIN_OUT |= DS18B20_PIN;  // Подтяжка к VCC
     HEATER_PIN_DIR |= HEATER_PIN;
     HEATER_PIN_SEL |= HEATER_PIN;
 }
@@ -329,16 +334,40 @@ uint16_t readADC()
 }
 
 // Функции работы с DS18B20
-void oneWireReset()
+/*void oneWireReset()
 {
     DS18B20_PIN_DIR |= DS18B20_PIN;
     DS18B20_PIN_OUT &= ~DS18B20_PIN;
     __delay_cycles(480);
     DS18B20_PIN_DIR &= ~DS18B20_PIN;
+    DS18B20_PIN_OUT |= DS18B20_PIN;
     __delay_cycles(70);
     while (DS18B20_PIN_IN & DS18B20_PIN)
         ;
     __delay_cycles(410);
+}
+*/
+uint8_t oneWireReset()
+{
+    const uint16_t TIMEOUT = 1000; // Максимальное время ожидания (настраивается)
+    uint16_t timeoutCount = 0;
+
+    // 1. Формирование импульса сброса
+    DS18B20_PIN_DIR |= DS18B20_PIN;  // Пин как выход
+    DS18B20_PIN_OUT &= ~DS18B20_PIN; // Низкий уровень
+    __delay_cycles(480);             // Импульс 480 мкс
+    DS18B20_PIN_DIR &= ~DS18B20_PIN; // Пин как вход
+                                     //   DS18B20_PIN_OUT |= DS18B20_PIN;  // Включить подтяжку к VCC
+    __delay_cycles(70);              // Ожидание 70 мкс
+
+    // 2. Ожидание ответа датчика с таймаутом
+    while ((DS18B20_PIN_IN & DS18B20_PIN) && (timeoutCount < TIMEOUT))
+    {
+        timeoutCount++;
+    }
+
+    __delay_cycles(410);             // Завершение тайминга
+    return (timeoutCount < TIMEOUT); // 1 = датчик ответил, 0 = таймаут
 }
 
 void oneWireWrite(uint8_t data)
@@ -350,8 +379,10 @@ void oneWireWrite(uint8_t data)
         __delay_cycles(2);
         if (data & 0x01)
             DS18B20_PIN_DIR &= ~DS18B20_PIN;
+        //      DS18B20_PIN_OUT |= DS18B20_PIN; 
         __delay_cycles(60);
         DS18B20_PIN_DIR &= ~DS18B20_PIN;
+        //       DS18B20_PIN_OUT |= DS18B20_PIN; 
         data >>= 1;
     }
 }
@@ -365,6 +396,7 @@ uint8_t oneWireRead()
         DS18B20_PIN_OUT &= ~DS18B20_PIN;
         __delay_cycles(2);
         DS18B20_PIN_DIR &= ~DS18B20_PIN;
+        //       DS18B20_PIN_OUT |= DS18B20_PIN;
         __delay_cycles(8);
         if (DS18B20_PIN_IN & DS18B20_PIN)
             data |= 0x01 << i;
@@ -385,6 +417,7 @@ int16_t readDS18B20()
     DS18B20_PIN_OUT &= ~DS18B20_PIN;
     __delay_cycles(480); // Reset pulse (минимум 480 мкс)
     DS18B20_PIN_DIR &= ~DS18B20_PIN;
+    //    DS18B20_PIN_OUT |= DS18B20_PIN; 
     __delay_cycles(70); // Ожидание presence pulse (15-60 мкс)
     absence = (DS18B20_PIN_IN & DS18B20_PIN);
     __delay_cycles(410); // Завершение тайминга reset
@@ -401,9 +434,13 @@ int16_t readDS18B20()
     // 3. Ожидание завершения с таймаутом (~750ms)
     while (timeout++ < CONVERSION_TIMEOUT_CYCLES)
     {
+        // WDTCTL = WDTPW | WDTCNTCL | WDTSSEL; // Сброс счётчика WDT
         __delay_cycles(1000); // Проверяем каждые 1ms
 
-        oneWireReset();
+        if (!oneWireReset())
+        {
+            return TEMP_READ_ERROR;
+        }
         oneWireWrite(0xCC);
         oneWireWrite(0xBE); // Читаем scratchpad
         if (oneWireRead())
