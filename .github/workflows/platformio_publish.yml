@@ -39,6 +39,7 @@ jobs:
         with:
           tag_name: "${{ steps.get-tag.outputs.date }}.${{ steps.get-tag.outputs.tag }}"
           name: "Release ${{ steps.get-tag.outputs.date}} (Build ${{ steps.get-tag.outputs.tag }})"
+          body: "Automated release from PR #${{ github.event.pull_request.number }}"
           files: |
             .pio/build/**/*.hex
             source-code.zip
