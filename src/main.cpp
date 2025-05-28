@@ -86,6 +86,7 @@ int32_t integral = 0; // Накопленная интегральная сум�
 int16_t lastError = 0;
 uint16_t pwmValue = 0;
 uint16_t lastADC = 0;                     // последнее значение АЦП - нужно для детектирования изменения уставки
+boolean SPchangeFlag = false;             // Флаг значительного изменения уставки
 int16_t lastTemperature = 0;              // последнее значение температуры
 int32_t d_term = 0;                       // Дифференциальная составляющая
 int32_t filtered_d_term = 0;              // Отфильтрованное значение
@@ -133,7 +134,6 @@ int main(void)
         int16_t error = 0;         // Ошибка
         int32_t integral_term = 0; // Интегральная составляющая
         int32_t p_term = 0;        // Пропорциональная составляющая
-
         if (measureFlag)
         {
             __disable_interrupt();
@@ -155,6 +155,7 @@ int main(void)
                 display.showString("Er", 2, 2); // показать ошибку
             }
             display.setBrightness(BRIGHT_1);
+            SPchangeFlag = false;
         }
 
         if (updateFlag)
@@ -166,8 +167,9 @@ int main(void)
             adcValue = (adcValue + readADC()) >> 1; // Безопасно, так как значение АЦП 10-битное
 
             // Если поменяли уставку, увеличить яркость и отложить измерение температуры, совмещённое с понижением яркости
-            if (abs((int)adcValue - (int)lastADC) > 40)
+            if (abs((int)adcValue - (int)lastADC) > 10)
             {
+                SPchangeFlag = true;
                 display.setBrightness(BRIGHT_HIGH);
                 __disable_interrupt();
                 updateCounter = 0; // Отложить измерение на 30 секунд, чтобы показать уставку с максимальной яркостью
@@ -178,32 +180,40 @@ int main(void)
             // Проверка крайних положений задающего органа
             if (adcValue <= ADC_DEADZONE_LOW)
             {
-                output = PWM_MIN;               // 0%
-                display.showString("LO", 2, 0); // Показать Low
+                output = PWM_MIN;                // 0%
+                display.showString("LO ", 3, 0); // Показать Low
             }
             else if (adcValue >= ADC_DEADZONE_HIGH)
             {
-                output = PWM_MAX;               // 100%
-                display.showString("HI", 2, 0); // Показать High
+                output = PWM_MAX;                // 100%
+                display.showString("HI ", 3, 0); // Показать High
             }
             else
             {
-                // Корректировка adcValue с учетом "мертвой зоны"
-                uint16_t adjustedValue = adcValue - ADC_DEADZONE_LOW;
-                uint32_t scaledValue = (uint32_t)adjustedValue * SETPOINT_RANGE_Q6;
-
-                // Расчет уставки с масштабированием на новый диапазон АЦП (100-923 → 0-823) // 16.0-25.3°C
-                setpoint = SETPOINT_MIN_Q6 + (scaledValue + (ADC_WORKZONE >> 1)) / ADC_WORKZONE;
-                display.showNumber((int)(setpoint >> 6), false, 2, 0); // Показать значение уставки
-                // display.showNumberDec((int)(((int32_t)setpoint*10+32) >> 6), 0b01000000, false, 3, 0); // Показать значение уставки
-
                 // Установка ШИМ
                 if (temperature == TEMP_READ_ERROR)
                 {                           // Действия при ошибке датчика
                     output = adcValue >> 2; // прямое управление ШИМ
+                    display.showNumber((int)((output * 100) >> 8), true, 2, 0);
+                    display.showString("%", 1, 2);
                 }
                 else
                 {
+                    // Корректировка adcValue с учетом "мертвой зоны"
+                    uint16_t adjustedValue = adcValue - ADC_DEADZONE_LOW;
+                    uint32_t scaledValue = (uint32_t)adjustedValue * SETPOINT_RANGE_Q6;
+
+                    // Расчет уставки с масштабированием на новый диапазон АЦП (100-923 → 0-823) // 16.0-25.3°C
+                    setpoint = SETPOINT_MIN_Q6 + (scaledValue + (ADC_WORKZONE >> 1)) / ADC_WORKZONE;
+                    if (SPchangeFlag)
+                    {
+                        display.showNumberDec((int)(((int32_t)setpoint * 10 + 32) >> 6), 0b01000000, false, 3, 0); // Показать значение уставки с десятыми
+                    }
+                    else
+                    {
+                        display.showNumber((int)(setpoint >> 6), false, 2, 0); // Показать значение уставки
+                        display.showString(" ", 1, 2);
+                    }
 
                     // Расчет ошибки (фиксированная точка 10.6)
                     error = setpoint - temperature;
@@ -248,7 +258,6 @@ int main(void)
             }
 
             pwmValue = (uint16_t)output;
-            display.showString(" ", 1, 2);
             showLevel(pwmValue, 3);
             TA0CCR1 = pwmValue; // Записать регистр ШИМ
 
