@@ -517,7 +517,7 @@ void showLevel(uint8_t level, uint8_t pos)
 // Заголовок CSV
 void initPIDDebug()
 {
-    debugSerial.begin(9600);
+    debugSerial.begin(38400);  // actual baud rate = 38400/16 = 2400 (library for 16MHz processors, but running @ 1MHz)
     debugSerial.println("Error,P-Term,I-Term,D-Term,Output,PWM"); // CSV header
 }
 
