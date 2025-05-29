@@ -248,7 +248,7 @@ int main(void)
                     }
                     else
                     {
-                        display.showNumber((int)(setpoint >> 6), false, 2, 0); // Показать значение уставки
+                        display.showNumber((int)((setpoint + 32) >> 6), false, 2, 0); // Показать значение уставки
                         display.showString(" ", 1, 2);
                     }
 
