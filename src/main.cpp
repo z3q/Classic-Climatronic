@@ -1,4 +1,3 @@
-
 /*
     PID thermostat for automotive climate control
     Copyright (C) 2025 z3q (Kirill A. Vorontsov)
@@ -189,7 +188,7 @@ int main(void)
                 lastTemperature = temperature;
                 d_term = (int32_t)KD * (int32_t)dError; // Дифференциальная составляющая
                 filtered_d_term = (filtered_d_term + d_term) >> 1;
-                display.showNumber((int)(temperature >> 6), false, 2, 2);
+                display.showNumber((int)((temperature + 32) >> 6), false, 2, 2);
             }
             else
             {
@@ -213,7 +212,7 @@ int main(void)
                 SPchangeFlag = true;
                 display.setBrightness(BRIGHT_HIGH);
                 __disable_interrupt();
-                updateCounter = 0; // Отложить измерение на 30 секунд, чтобы показать уставку с максимальной яркостью
+                updateCounter = TEMP_MEASURE_INTERVAL >> 1; // Отложить измерение на 15 секунд, чтобы показать уставку с максимальной яркостью
                 __enable_interrupt();
                 lastADC = adcValue; // Запомнить уставку для следующего сравнения
             }
@@ -517,7 +516,7 @@ void showLevel(uint8_t level, uint8_t pos)
 // Заголовок CSV
 void initPIDDebug()
 {
-    debugSerial.begin(38400);  // actual baud rate = 38400/16 = 2400 (library for 16MHz processors, but running @ 1MHz)
+    debugSerial.begin(38400);                                     // actual baud rate = 38400/16 = 2400 (library for 16MHz processors, but running @ 1MHz)
     debugSerial.println("Error,P-Term,I-Term,D-Term,Output,PWM"); // CSV header
 }
 
