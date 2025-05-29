@@ -17,6 +17,43 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+/* MSP430G2452 pinout
+        ┌───────┐
+DVCC  1 │●      │ 20 DVSS   (3.3V Power | GND)
+P1.0  2 │       │ 19 XIN    (Unused | Unused)
+P1.1  3 │       │ 18 XOUT   (DEBUG_TX when DEBUG_PID | Unused)
+P1.2  4 │       │ 17 TEST   (Heater PWM output | SBW Programming)
+P1.3  5 │       │ 16 RST    (Unused | Reset)
+P1.4  6 │       │ 15 P1.7   (Setpoint Analog Input | TM1637 DIO)
+P1.5  7 │       │ 14 P1.6   (DEBUG_RX when DEBUG_PID | TM1637 CLK)
+P2.0  8 │       │ 13 P2.5   (Unused | DS18B20 Temperature Sensor)
+P2.1  9 │       │ 12 P2.4   (Unused | Unused)
+P2.2 10 │       │ 11 P2.3   (Unused | Unused)
+        └───────┘
+
+Pin Functions:
+1.  DVCC    - 3.3V Power
+2.  P1.0    - Unused
+3.  P1.1    - UART TX (debug output when DEBUG_PID enabled)
+4.  P1.2    - PWM output to heater (TA0.1)
+5.  P1.3    - Unused
+6.  P1.4    - Setpoint analog input (ADC10 A4)
+7.  P1.5    - UART RX (debug input when DEBUG_PID enabled, unused in code)
+8.  P2.0    - Unused
+9.  P2.1    - Unused
+10. P2.2    - Unused
+11. P2.3    - Unused
+12. P2.4    - Unused
+13. P2.5    - DS18B20 temperature sensor data pin
+14. P1.6    - TM1637 display CLK
+15. P1.7    - TM1637 display DIO
+16. RST     - Active-low reset input, used for programming
+17. TEST    - Test pin for programming
+18. XOUT    - Unused (crystal output)
+19. XIN     - Unused (crystal input)
+20. DVSS    - Ground
+*/
+
 // #define DEBUG_PID  // Закомментировать для финального релиза (отключит UART и отладку)
 
 #include <msp430.h>
