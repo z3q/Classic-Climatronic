@@ -144,6 +144,7 @@ void oneWireWrite(uint8_t data);
 uint8_t oneWireRead();
 void showLevel(uint8_t level, uint8_t pos);
 #ifdef DEBUG_PID
+void initPIDDebug();
 void sendPIDDebug(int16_t error, int32_t p_term, int32_t i_term, int16_t d_term, int32_t output, uint16_t pwm);
 #endif
 
@@ -156,6 +157,9 @@ int main(void)
     initPWM();
     initADC();
     display.clear();
+#ifdef DEBUG_PID
+    initPIDDebug();
+#endif
 
     __enable_interrupt();
 
@@ -299,7 +303,7 @@ int main(void)
             TA0CCR1 = pwmValue; // Записать регистр ШИМ
 
 #ifdef DEBUG_PID
-            sendPIDDebug(error, p_term, integral_term, d_term, raw_output, pwmValue); // Отправка отладочной информации
+            sendPIDDebug(error, p_term, integral_term, filtered_d_term, raw_output, pwmValue); // Отправка отладочной информации
 #endif
         }
         LPM3;
