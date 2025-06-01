@@ -69,8 +69,8 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 
 // Коэффициенты ПИД-регулятора (фиксированная точка Q8.8)
 #define KP 0x0060 // пропорциональнай коэффициент
-#define KD 0x0080 // дифференциальный коэффицинет
-#define KI 0x00d0 // интегральный коэффициент (использовать в расчете как (KI * integral) >> 16) 0,0003/сек точность Q16.16
+#define KD 0x0200 // дифференциальный коэффицинет
+#define KI 0x0da7 // интегральный коэффициент (использовать в расчете как (KI * integral) >> 16) 0,0003/сек точность Q16.16
 
 // Display connection pins (Digital Pins)
 #define CLK 14
@@ -138,7 +138,7 @@ void initPWM();
 void initADC();
 uint16_t readADC();
 int16_t readDS18B20();
-void oneWireReset();
+uint8_t oneWireReset();
 void oneWireWrite(uint8_t data);
 uint8_t oneWireRead();
 void showLevel(uint8_t level, uint8_t pos);
@@ -270,7 +270,7 @@ int main(void)
 
                     // Расчет выхода (Q16.16)
                     output = p_term + filtered_d_term + integral_term;
-                    // display.showNumber((p_term),  false, 4, 0);
+                    display.showNumber((integral_term >> 6), false, 4, 0);
 
 #ifdef DEBUG_PID
                     raw_output = output;
@@ -378,16 +378,44 @@ uint16_t readADC()
 }
 
 // Функции работы с DS18B20
-void oneWireReset()
+/*void oneWireReset()
 {
     DS18B20_PIN_DIR |= DS18B20_PIN;
     DS18B20_PIN_OUT &= ~DS18B20_PIN;
     __delay_cycles(480);
     DS18B20_PIN_DIR &= ~DS18B20_PIN;
     __delay_cycles(70);
-    while (DS18B20_PIN_IN & DS18B20_PIN)
-        ;
+    // Таймаут ожидания presence pulse (1000 циклов = 1000 мкс)
+    uint16_t timeout = 1000;
+    while ((DS18B20_PIN_IN & DS18B20_PIN) && timeout > 0)
+    {
+        timeout--;
+        __delay_cycles(1);
+    }
     __delay_cycles(410);
+}
+*/
+uint8_t oneWireReset()
+{
+    const uint16_t TIMEOUT = 1000; // Максимальное время ожидания (настраивается)
+    uint16_t timeoutCount = 0;
+
+    // 1. Формирование импульса сброса
+    DS18B20_PIN_DIR |= DS18B20_PIN;  // Пин как выход
+    DS18B20_PIN_OUT &= ~DS18B20_PIN; // Низкий уровень
+    __delay_cycles(480);             // Импульс 480 мкс
+    DS18B20_PIN_DIR &= ~DS18B20_PIN; // Пин как вход
+                                     //   DS18B20_PIN_OUT |= DS18B20_PIN;  // Включить подтяжку к VCC
+    __delay_cycles(70);              // Ожидание 70 мкс
+
+    // 2. Ожидание ответа датчика с таймаутом
+    while ((DS18B20_PIN_IN & DS18B20_PIN) && (timeoutCount < TIMEOUT))
+    {
+        timeoutCount++;
+    }
+
+    __delay_cycles(410);             // Завершение тайминга
+    return (timeoutCount < TIMEOUT); // 1 = датчик ответил, 0 = таймаут
 }
 
 void oneWireWrite(uint8_t data)
@@ -430,6 +458,7 @@ int16_t readDS18B20()
     const uint32_t CONVERSION_TIMEOUT_CYCLES = 850; // Для 1MHz ~750ms
 
     // 1. Reset и проверка присутствия
+    /*
     DS18B20_PIN_DIR |= DS18B20_PIN;
     DS18B20_PIN_OUT &= ~DS18B20_PIN;
     __delay_cycles(480); // Reset pulse (минимум 480 мкс)
@@ -442,7 +471,11 @@ int16_t readDS18B20()
     { // No sensor connected
         return TEMP_READ_ERROR;
     }
-
+*/
+    if (!oneWireReset())
+    {
+        return TEMP_READ_ERROR;
+    }
     // 2. Запуск преобразования
     oneWireWrite(0xCC); // Skip ROM
     oneWireWrite(0x44); // Convert T
@@ -452,7 +485,10 @@ int16_t readDS18B20()
     {
         __delay_cycles(1000); // Проверяем каждые 1ms
 
-        oneWireReset();
+        if (!oneWireReset())
+        {
+            return TEMP_READ_ERROR;
+        }
         oneWireWrite(0xCC);
         oneWireWrite(0xBE); // Читаем scratchpad
         if (oneWireRead())
