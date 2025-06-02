@@ -270,7 +270,7 @@ int main(void)
 
                     // Расчет выхода (Q16.16)
                     output = p_term + filtered_d_term + integral_term;
-                    display.showNumber((integral_term >> 6), false, 4, 0);
+                    // display.showNumber((integral_term >> 6), false, 4, 0);
 
 #ifdef DEBUG_PID
                     raw_output = output;
