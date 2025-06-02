@@ -453,7 +453,7 @@ uint8_t oneWireRead()
 int16_t readDS18B20()
 {
     uint16_t temp = TEMP_READ_ERROR;
-    uint8_t absence = 1; // отсутствие датчика
+    // uint8_t absence = 1; // отсутствие датчика
     uint32_t timeout = 0;
     const uint32_t CONVERSION_TIMEOUT_CYCLES = 850; // Для 1MHz ~750ms
 
