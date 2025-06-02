@@ -364,8 +364,8 @@ __interrupt void Timer0_A0_ISR(void)
             updateCounter = 0;
             measureFlag = 1;
         }
+        LPM3_EXIT;
     }
-    LPM3_EXIT;
 }
 
 // Чтение АЦП
@@ -483,16 +483,9 @@ int16_t readDS18B20()
     // 3. Ожидание завершения с таймаутом (~750ms)
     while (timeout++ < CONVERSION_TIMEOUT_CYCLES)
     {
-        __delay_cycles(1000); // Проверяем каждые 1ms
-
-        if (!oneWireReset())
-        {
-            return TEMP_READ_ERROR;
-        }
-        oneWireWrite(0xCC);
-        oneWireWrite(0xBE); // Читаем scratchpad
-        if (oneWireRead())
-            break; // Бит 0 = 1 -> преобразование завершено
+        __delay_cycles(2000); // Проверяем каждые 2ms
+        if (oneWireRead())    // Читаем целый байт - 8 раз запрос бита с корректными таймингами
+            break;            // если есть хоть одна 1 -> преобразование завершено
     }
 
     if (timeout >= CONVERSION_TIMEOUT_CYCLES)
@@ -501,9 +494,12 @@ int16_t readDS18B20()
     }
 
     // 4. Чтение результата
-    oneWireReset();
-    oneWireWrite(0xCC);
-    oneWireWrite(0xBE);
+    if (!oneWireReset())
+    {
+        return TEMP_READ_ERROR;
+    }
+    oneWireWrite(0xCC); // Skip ROM
+    oneWireWrite(0xBE); // Читаем scratchpad
 
     uint8_t lsb = oneWireRead();
     uint8_t msb = oneWireRead();
