@@ -378,23 +378,7 @@ uint16_t readADC()
 }
 
 // Функции работы с DS18B20
-/*void oneWireReset()
-{
-    DS18B20_PIN_DIR |= DS18B20_PIN;
-    DS18B20_PIN_OUT &= ~DS18B20_PIN;
-    __delay_cycles(480);
-    DS18B20_PIN_DIR &= ~DS18B20_PIN;
-    __delay_cycles(70);
-    // Таймаут ожидания presence pulse (1000 циклов = 1000 мкс)
-    uint16_t timeout = 1000;
-    while ((DS18B20_PIN_IN & DS18B20_PIN) && timeout > 0)
-    {
-        timeout--;
-        __delay_cycles(1);
-    }
-    __delay_cycles(410);
-}
-*/
+
 uint8_t oneWireReset()
 {
     const uint16_t TIMEOUT = 1000; // Максимальное время ожидания (настраивается)
@@ -453,25 +437,10 @@ uint8_t oneWireRead()
 int16_t readDS18B20()
 {
     uint16_t temp = TEMP_READ_ERROR;
-    // uint8_t absence = 1; // отсутствие датчика
     uint32_t timeout = 0;
     const uint32_t CONVERSION_TIMEOUT_CYCLES = 850; // Для 1MHz ~750ms
 
     // 1. Reset и проверка присутствия
-    /*
-    DS18B20_PIN_DIR |= DS18B20_PIN;
-    DS18B20_PIN_OUT &= ~DS18B20_PIN;
-    __delay_cycles(480); // Reset pulse (минимум 480 мкс)
-    DS18B20_PIN_DIR &= ~DS18B20_PIN;
-    __delay_cycles(70); // Ожидание presence pulse (15-60 мкс)
-    absence = (DS18B20_PIN_IN & DS18B20_PIN);
-    __delay_cycles(410); // Завершение тайминга reset
-
-    if (absence)
-    { // No sensor connected
-        return TEMP_READ_ERROR;
-    }
-*/
     if (!oneWireReset())
     {
         return TEMP_READ_ERROR;
