@@ -94,7 +94,7 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 #define MAX_VALID_TEMP 80      // 80.0°C (максимальная возможная температура)
 #define TEMP_READ_ERROR 0x2000 // Значение при ошибке чтения
 
-#define SETPOINT_MIN_Q6 1024  // (16.0 * 64)  = 1024 (16.0°C в Q10.6) минимальная уставка // 23*64 = 1472 для отладки в жару
+#define SETPOINT_MIN_Q6 1472  // (16.0 * 64)  = 1024 (16.0°C в Q10.6) минимальная уставка // 23*64 = 1472 для отладки в жару
 #define SETPOINT_RANGE_Q6 600 // (9.375 * 64)  = 600 (9.375°C в Q10.6) диапазон уставки
 
 #define ADC_DEADZONE_LOW 250                                // Нижняя граница "мертвой зоны" АЦП
