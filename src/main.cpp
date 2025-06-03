@@ -53,7 +53,7 @@ Pin Functions:
 20. DVSS    - Ground
 */
 
- #define DEBUG_PID  // Закомментировать для финального релиза (отключит UART и отладку). не лезет в RAM на 6 байт
+ #define DEBUG_PID  // Закомментировать для финального релиза (отключит UART и отладку).
 
 #include <msp430.h>
 #include <stdint.h>
