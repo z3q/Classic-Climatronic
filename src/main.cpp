@@ -111,7 +111,6 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 #define TEMP_MEASURE_INTERVAL 30    // Измерение температуры каждые 30 сек (в PD_UPDATE_INTERVAL)
 
 // Глобальные переменные
-// volatile uint16_t pwmCounter = 0;
 volatile uint16_t updateCounter = 0;
 volatile uint8_t measureFlag = 0;
 volatile uint8_t updateFlag = 0;
