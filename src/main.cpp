@@ -116,7 +116,7 @@ volatile uint16_t updateCounter = 0;
 volatile uint8_t measureFlag = 0;
 volatile uint8_t updateFlag = 0;
 
-const int32_t INTEGRAL_MAX = 2147483647 / KI - 1; // 2147450879;  // максимальное безопасное значение интеграла
+const int32_t INTEGRAL_MAX = 2147483647L / KI - 1; // 2147450879;  // максимальное безопасное значение интеграла
 const int32_t INTEGRAL_MIN = -INTEGRAL_MAX;       //-2147450879; // минимальное безопасное значение интеграла
 
 TM1637TinyDisplay display(CLK, DIO); // 4-разрядный 7-сегментный дисплей с точками
