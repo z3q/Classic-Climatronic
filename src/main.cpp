@@ -53,7 +53,7 @@ Pin Functions:
 20. DVSS    - Ground
 */
 
-// #define DEBUG_PID  // Закомментировать для финального релиза (отключит UART и отладку). не лезет в RAM на 6 байт
+ #define DEBUG_PID  // Закомментировать для финального релиза (отключит UART и отладку). не лезет в RAM на 6 байт
 
 #include <msp430.h>
 #include <stdint.h>
@@ -119,7 +119,9 @@ volatile uint8_t updateFlag = 0;
 const int32_t INTEGRAL_MAX = 2147483647L / KI - 1; // 2147450879;  // максимальное безопасное значение интеграла
 const int32_t INTEGRAL_MIN = -INTEGRAL_MAX;        //-2147450879; // минимальное безопасное значение интеграла
 
+#ifndef DEBUG_PID
 TM1637TinyDisplay display(CLK, DIO); // 4-разрядный 7-сегментный дисплей с точками
+#endif
 
 // Прототипы функций
 void initClock();
@@ -131,10 +133,11 @@ int16_t readDS18B20();
 uint8_t oneWireReset();
 void oneWireWrite(uint8_t data);
 uint8_t oneWireRead();
-void showLevel(uint8_t level, uint8_t pos);
 #ifdef DEBUG_PID
 void initPIDDebug();
 void sendPIDDebug(int16_t error, int32_t p_term, int32_t i_term, int16_t d_term, int32_t output, uint16_t pwm);
+#else
+void showLevel(uint8_t level, uint8_t pos);
 #endif
 
 int main(void)
@@ -156,9 +159,10 @@ int main(void)
     initGPIO();
     initPWM();
     initADC();
-    display.clear();
 #ifdef DEBUG_PID
     initPIDDebug();
+#else
+    display.clear();
 #endif
 
     __enable_interrupt();
@@ -189,13 +193,19 @@ int main(void)
                 lastTemperature = temperature;
                 d_term = (int32_t)KD * (int32_t)dError; // Дифференциальная составляющая
                 filtered_d_term = (filtered_d_term + d_term) >> 1;
+#ifndef DEBUG_PID
                 display.showNumber((int)((temperature + 32) >> 6), false, 2, 2);
+#endif
             }
             else
             {
+#ifndef DEBUG_PID
                 display.showString("Er", 2, 2); // показать ошибку
+#endif
             }
+#ifndef DEBUG_PID
             display.setBrightness(BRIGHT_1);
+#endif
             SPchangeFlag = false;
         }
 
@@ -211,7 +221,9 @@ int main(void)
             if (abs((int)adcValue - (int)lastADC) > 10)
             {
                 SPchangeFlag = true;
+#ifndef DEBUG_PID
                 display.setBrightness(BRIGHT_HIGH);
+#endif
                 __disable_interrupt();
                 updateCounter = TEMP_MEASURE_INTERVAL >> 1; // Отложить измерение на 15 секунд, чтобы показать уставку с максимальной яркостью
                 __enable_interrupt();
@@ -221,13 +233,17 @@ int main(void)
             // Проверка крайних положений задающего органа
             if (adcValue <= ADC_DEADZONE_LOW)
             {
-                output = PWM_MIN;                // 0%
+                output = PWM_MIN; // 0%
+#ifndef DEBUG_PID
                 display.showString("LO ", 3, 0); // Показать Low
+#endif
             }
             else if (adcValue >= ADC_DEADZONE_HIGH)
             {
-                output = PWM_MAX;                // 100%
+                output = PWM_MAX; // 100%
+#ifndef DEBUG_PID
                 display.showString("HI ", 3, 0); // Показать High
+#endif
             }
             else
             {
@@ -235,8 +251,10 @@ int main(void)
                 if (temperature == TEMP_READ_ERROR)
                 {                           // Действия при ошибке датчика
                     output = adcValue >> 2; // прямое управление ШИМ
+#ifndef DEBUG_PID
                     display.showNumber((int)((output * 100) >> 8), true, 2, 0);
                     display.showString("%", 1, 2);
+#endif
                 }
                 else
                 {
@@ -246,6 +264,7 @@ int main(void)
 
                     // Расчет уставки с масштабированием на новый диапазон АЦП (100-923 → 0-823) // 16.0-25.3°C
                     setpoint = SETPOINT_MIN_Q6 + (scaledValue + (ADC_WORKZONE >> 1)) / ADC_WORKZONE;
+#ifndef DEBUG_PID
                     if (SPchangeFlag)
                     {
                         display.showNumberDec((int)(((int32_t)setpoint * 10 + 32) >> 6), 0b01000000, false, 3, 0); // Показать значение уставки с десятыми
@@ -255,7 +274,7 @@ int main(void)
                         display.showNumber((int)((setpoint + 32) >> 6), false, 2, 0); // Показать значение уставки
                         display.showString(" ", 1, 2);
                     }
-
+#endif
                     // Расчет ошибки (фиксированная точка 10.6)
                     error = setpoint - temperature;
 
@@ -299,7 +318,9 @@ int main(void)
             }
 
             pwmValue = (uint16_t)output;
+#ifndef DEBUG_PID
             showLevel(pwmValue, 3);
+#endif
             TA0CCR1 = pwmValue; // Записать регистр ШИМ
 
 #ifdef DEBUG_PID
@@ -486,6 +507,32 @@ int16_t readDS18B20()
     return converted_temp; // Возвращаем знаковое число
 }
 
+#ifdef DEBUG_PID
+// Заголовок CSV
+void initPIDDebug()
+{
+    debugSerial.begin(38400);                                     // actual baud rate = 38400/16 = 2400 (library for 16MHz processors, but running @ 1MHz)
+    debugSerial.println("Error,P-Term,I-Term,D-Term,Output,PWM"); // CSV header
+}
+
+// Функция вывода данных в CSV формате
+void sendPIDDebug(int16_t error, int32_t p_term,
+                  int32_t i_term, int16_t d_term,
+                  int32_t output, uint16_t pwm)
+{
+    debugSerial.print(error);
+    debugSerial.print(',');
+    debugSerial.print(p_term);
+    debugSerial.print(',');
+    debugSerial.print(i_term);
+    debugSerial.print(',');
+    debugSerial.print(d_term);
+    debugSerial.print(',');
+    debugSerial.print(output);
+    debugSerial.print(',');
+    debugSerial.println(pwm);
+}
+#else
 void showLevel(uint8_t level, uint8_t pos)
 {
     uint8_t digits[1] = {0};
@@ -512,31 +559,5 @@ void showLevel(uint8_t level, uint8_t pos)
     }
 
     display.setSegments(digits, 1, pos);
-}
-
-#ifdef DEBUG_PID
-// Заголовок CSV
-void initPIDDebug()
-{
-    debugSerial.begin(38400);                                     // actual baud rate = 38400/16 = 2400 (library for 16MHz processors, but running @ 1MHz)
-    debugSerial.println("Error,P-Term,I-Term,D-Term,Output,PWM"); // CSV header
-}
-
-// Функция вывода данных в CSV формате
-void sendPIDDebug(int16_t error, int32_t p_term,
-                  int32_t i_term, int16_t d_term,
-                  int32_t output, uint16_t pwm)
-{
-    debugSerial.print(error);
-    debugSerial.print(',');
-    debugSerial.print(p_term);
-    debugSerial.print(',');
-    debugSerial.print(i_term);
-    debugSerial.print(',');
-    debugSerial.print(d_term);
-    debugSerial.print(',');
-    debugSerial.print(output);
-    debugSerial.print(',');
-    debugSerial.println(pwm);
 }
 #endif
