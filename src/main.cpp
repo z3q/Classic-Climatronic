@@ -1,4 +1,3 @@
-
 /*
     PID thermostat for automotive climate control
     Copyright (C) 2025 z3q (Kirill A. Vorontsov)
@@ -17,7 +16,44 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-// #define DEBUG_PID  // Закомментировать для финального релиза (отключит UART и отладку)
+/* MSP430G2452 pinout
+        ┌───────┐
+DVCC  1 │●      │ 20 DVSS   (3.3V Power | GND)
+P1.0  2 │       │ 19 XIN    (Unused | Unused)
+P1.1  3 │       │ 18 XOUT   (DEBUG_TX when DEBUG_PID | Unused)
+P1.2  4 │       │ 17 TEST   (Heater PWM output | SBW Programming)
+P1.3  5 │       │ 16 RST    (Unused | Reset)
+P1.4  6 │       │ 15 P1.7   (Setpoint Analog Input | TM1637 DIO)
+P1.5  7 │       │ 14 P1.6   (DEBUG_RX when DEBUG_PID | TM1637 CLK)
+P2.0  8 │       │ 13 P2.5   (Unused | DS18B20 Temperature Sensor)
+P2.1  9 │       │ 12 P2.4   (Unused | Unused)
+P2.2 10 │       │ 11 P2.3   (Unused | Unused)
+        └───────┘
+
+Pin Functions:
+1.  DVCC    - 3.3V Power
+2.  P1.0    - Unused
+3.  P1.1    - UART TX (debug output when DEBUG_PID enabled)
+4.  P1.2    - PWM output to heater (TA0.1)
+5.  P1.3    - Unused
+6.  P1.4    - Setpoint analog input (ADC10 A4)
+7.  P1.5    - UART RX (debug input when DEBUG_PID enabled, unused in code)
+8.  P2.0    - Unused
+9.  P2.1    - Unused
+10. P2.2    - Unused
+11. P2.3    - Unused
+12. P2.4    - Unused
+13. P2.5    - DS18B20 temperature sensor data pin
+14. P1.6    - TM1637 display CLK
+15. P1.7    - TM1637 display DIO
+16. RST     - Active-low reset input, used for programming
+17. TEST    - Test pin for programming
+18. XOUT    - Unused (crystal output)
+19. XIN     - Unused (crystal input)
+20. DVSS    - Ground
+*/
+
+// #define DEBUG_PID  // Закомментировать для финального релиза (отключит UART и отладку).
 
 #include <msp430.h>
 #include <stdint.h>
@@ -33,8 +69,8 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 
 // Коэффициенты ПИД-регулятора (фиксированная точка Q8.8)
 #define KP 0x0060 // пропорциональнай коэффициент
-#define KD 0x0080 // дифференциальный коэффицинет
-#define KI 0x00d0 // интегральный коэффициент (использовать в расчете как (KI * integral) >> 16) 0,0003/сек точность Q16.16
+#define KD 0x0200 // дифференциальный коэффицинет
+#define KI 0x0da7 // интегральный коэффициент (использовать в расчете как (KI * integral) >> 16) 0,0003/сек точность Q16.16
 
 // Display connection pins (Digital Pins)
 #define CLK 14
@@ -75,24 +111,17 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 #define TEMP_MEASURE_INTERVAL 30    // Измерение температуры каждые 30 сек (в PD_UPDATE_INTERVAL)
 
 // Глобальные переменные
-volatile uint16_t pwmCounter = 0;
+// volatile uint16_t pwmCounter = 0;
 volatile uint16_t updateCounter = 0;
 volatile uint8_t measureFlag = 0;
 volatile uint8_t updateFlag = 0;
-uint16_t adcValue = 0; // значние АЦП
-int16_t setpoint = 0;  // уставка
-int16_t temperature = 0;
-int32_t integral = 0; // Накопленная интегральная сумма (Q16.16)
-int16_t lastError = 0;
-uint16_t pwmValue = 0;
-uint16_t lastADC = 0;                     // последнее значение АЦП - нужно для детектирования изменения уставки
-int16_t lastTemperature = 0;              // последнее значение температуры
-int32_t d_term = 0;                       // Дифференциальная составляющая
-int32_t filtered_d_term = 0;              // Отфильтрованное значение
-const int32_t INTEGRAL_MIN = -2147450879; // минимальное безопасное значение интеграла
-const int32_t INTEGRAL_MAX = 2147450879;  // максимальное безопасное значение интеграла
 
+const int32_t INTEGRAL_MAX = 2147483647L / KI - 1; // 2147450879;  // максимальное безопасное значение интеграла
+const int32_t INTEGRAL_MIN = -INTEGRAL_MAX;        //-2147450879; // минимальное безопасное значение интеграла
+
+#ifndef DEBUG_PID
 TM1637TinyDisplay display(CLK, DIO); // 4-разрядный 7-сегментный дисплей с точками
+#endif
 
 // Прототипы функций
 void initClock();
@@ -101,23 +130,40 @@ void initPWM();
 void initADC();
 uint16_t readADC();
 int16_t readDS18B20();
-void oneWireReset();
+uint8_t oneWireReset();
 void oneWireWrite(uint8_t data);
 uint8_t oneWireRead();
-void showLevel(uint8_t level, uint8_t pos);
 #ifdef DEBUG_PID
+void initPIDDebug();
 void sendPIDDebug(int16_t error, int32_t p_term, int32_t i_term, int16_t d_term, int32_t output, uint16_t pwm);
+#else
+void showLevel(uint8_t level, uint8_t pos);
 #endif
 
 int main(void)
 {
+    uint16_t adcValue = 0; // значние АЦП
+    int16_t setpoint = 0;  // уставка
+    int16_t temperature = 0;
+    int32_t integral = 0; // Накопленная интегральная сумма (Q16.16)
+    uint16_t pwmValue = 0;
+    uint16_t lastADC = 0;         // последнее значение АЦП - нужно для детектирования изменения уставки
+    boolean SPchangeFlag = false; // Флаг значительного изменения уставки
+    int16_t lastTemperature = 0;  // последнее значение температуры
+    int32_t d_term = 0;           // Дифференциальная составляющая
+    int32_t filtered_d_term = 0;  // Отфильтрованное значение
+
     WDTCTL = WDTPW | WDTHOLD; // Остановить watchdog
 
     initClock();
     initGPIO();
     initPWM();
     initADC();
+#ifdef DEBUG_PID
+    initPIDDebug();
+#else
     display.clear();
+#endif
 
     __enable_interrupt();
 
@@ -133,7 +179,6 @@ int main(void)
         int16_t error = 0;         // Ошибка
         int32_t integral_term = 0; // Интегральная составляющая
         int32_t p_term = 0;        // Пропорциональная составляющая
-
         if (measureFlag)
         {
             __disable_interrupt();
@@ -148,13 +193,20 @@ int main(void)
                 lastTemperature = temperature;
                 d_term = (int32_t)KD * (int32_t)dError; // Дифференциальная составляющая
                 filtered_d_term = (filtered_d_term + d_term) >> 1;
-                display.showNumber((int)(temperature >> 6), false, 2, 2);
+#ifndef DEBUG_PID
+                display.showNumber((int)((temperature + 32) >> 6), false, 2, 2);
+#endif
             }
             else
             {
+#ifndef DEBUG_PID
                 display.showString("Er", 2, 2); // показать ошибку
+#endif
             }
+#ifndef DEBUG_PID
             display.setBrightness(BRIGHT_1);
+#endif
+            SPchangeFlag = false;
         }
 
         if (updateFlag)
@@ -166,11 +218,14 @@ int main(void)
             adcValue = (adcValue + readADC()) >> 1; // Безопасно, так как значение АЦП 10-битное
 
             // Если поменяли уставку, увеличить яркость и отложить измерение температуры, совмещённое с понижением яркости
-            if (abs((int)adcValue - (int)lastADC) > 40)
+            if (abs((int)adcValue - (int)lastADC) > 10)
             {
+                SPchangeFlag = true;
+#ifndef DEBUG_PID
                 display.setBrightness(BRIGHT_HIGH);
+#endif
                 __disable_interrupt();
-                updateCounter = 0; // Отложить измерение на 30 секунд, чтобы показать уставку с максимальной яркостью
+                updateCounter = TEMP_MEASURE_INTERVAL >> 1; // Отложить измерение на 15 секунд, чтобы показать уставку с максимальной яркостью
                 __enable_interrupt();
                 lastADC = adcValue; // Запомнить уставку для следующего сравнения
             }
@@ -178,33 +233,48 @@ int main(void)
             // Проверка крайних положений задающего органа
             if (adcValue <= ADC_DEADZONE_LOW)
             {
-                output = PWM_MIN;               // 0%
-                display.showString("LO", 2, 0); // Показать Low
+                output = PWM_MIN; // 0%
+#ifndef DEBUG_PID
+                display.showString("LO ", 3, 0); // Показать Low
+#endif
             }
             else if (adcValue >= ADC_DEADZONE_HIGH)
             {
-                output = PWM_MAX;               // 100%
-                display.showString("HI", 2, 0); // Показать High
+                output = PWM_MAX; // 100%
+#ifndef DEBUG_PID
+                display.showString("HI ", 3, 0); // Показать High
+#endif
             }
             else
             {
-                // Корректировка adcValue с учетом "мертвой зоны"
-                uint16_t adjustedValue = adcValue - ADC_DEADZONE_LOW;
-                uint32_t scaledValue = (uint32_t)adjustedValue * SETPOINT_RANGE_Q6;
-
-                // Расчет уставки с масштабированием на новый диапазон АЦП (100-923 → 0-823) // 16.0-25.3°C
-                setpoint = SETPOINT_MIN_Q6 + (scaledValue + (ADC_WORKZONE >> 1)) / ADC_WORKZONE;
-                display.showNumber((int)(setpoint >> 6), false, 2, 0); // Показать значение уставки
-                // display.showNumberDec((int)(((int32_t)setpoint*10+32) >> 6), 0b01000000, false, 3, 0); // Показать значение уставки
-
                 // Установка ШИМ
                 if (temperature == TEMP_READ_ERROR)
                 {                           // Действия при ошибке датчика
                     output = adcValue >> 2; // прямое управление ШИМ
+#ifndef DEBUG_PID
+                    display.showNumber((int)((output * 100) >> 8), true, 2, 0);
+                    display.showString("%", 1, 2);
+#endif
                 }
                 else
                 {
+                    // Корректировка adcValue с учетом "мертвой зоны"
+                    uint16_t adjustedValue = adcValue - ADC_DEADZONE_LOW;
+                    uint32_t scaledValue = (uint32_t)adjustedValue * SETPOINT_RANGE_Q6;
 
+                    // Расчет уставки с масштабированием на новый диапазон АЦП (100-923 → 0-823) // 16.0-25.3°C
+                    setpoint = SETPOINT_MIN_Q6 + (scaledValue + (ADC_WORKZONE >> 1)) / ADC_WORKZONE;
+#ifndef DEBUG_PID
+                    if (SPchangeFlag)
+                    {
+                        display.showNumberDec((int)(((int32_t)setpoint * 10 + 32) >> 6), 0b01000000, false, 3, 0); // Показать значение уставки с десятыми
+                    }
+                    else
+                    {
+                        display.showNumber((int)((setpoint + 32) >> 6), false, 2, 0); // Показать значение уставки
+                        display.showString(" ", 1, 2);
+                    }
+#endif
                     // Расчет ошибки (фиксированная точка 10.6)
                     error = setpoint - temperature;
 
@@ -220,7 +290,7 @@ int main(void)
 
                     // Расчет выхода (Q16.16)
                     output = p_term + filtered_d_term + integral_term;
-                    // display.showNumber((p_term),  false, 4, 0);
+                    // display.showNumber((integral_term >> 6), false, 4, 0);
 
 #ifdef DEBUG_PID
                     raw_output = output;
@@ -248,12 +318,13 @@ int main(void)
             }
 
             pwmValue = (uint16_t)output;
-            display.showString(" ", 1, 2);
+#ifndef DEBUG_PID
             showLevel(pwmValue, 3);
+#endif
             TA0CCR1 = pwmValue; // Записать регистр ШИМ
 
 #ifdef DEBUG_PID
-            sendPIDDebug(error, p_term, integral_term, d_term, raw_output, pwmValue); // Отправка отладочной информации
+            sendPIDDebug(error, p_term, integral_term, filtered_d_term, raw_output, pwmValue); // Отправка отладочной информации
 #endif
         }
         LPM3;
@@ -300,6 +371,7 @@ void initADC()
 #pragma vector = TIMER0_A0_VECTOR
 __interrupt void Timer0_A0_ISR(void)
 {
+    static uint16_t pwmCounter = 0;
     pwmCounter++;
 
     // Обновление ПД-регулятора каждую секунду (1000 циклов при 1 кГц)
@@ -315,8 +387,8 @@ __interrupt void Timer0_A0_ISR(void)
             updateCounter = 0;
             measureFlag = 1;
         }
+        LPM3_EXIT;
     }
-    LPM3_EXIT;
 }
 
 // Чтение АЦП
@@ -329,16 +401,28 @@ uint16_t readADC()
 }
 
 // Функции работы с DS18B20
-void oneWireReset()
+
+uint8_t oneWireReset()
 {
-    DS18B20_PIN_DIR |= DS18B20_PIN;
-    DS18B20_PIN_OUT &= ~DS18B20_PIN;
-    __delay_cycles(480);
-    DS18B20_PIN_DIR &= ~DS18B20_PIN;
-    __delay_cycles(70);
-    while (DS18B20_PIN_IN & DS18B20_PIN)
-        ;
-    __delay_cycles(410);
+    const uint16_t TIMEOUT = 1000; // Максимальное время ожидания (настраивается)
+    uint16_t timeoutCount = 0;
+
+    // 1. Формирование импульса сброса
+    DS18B20_PIN_DIR |= DS18B20_PIN;  // Пин как выход
+    DS18B20_PIN_OUT &= ~DS18B20_PIN; // Низкий уровень
+    __delay_cycles(480);             // Импульс 480 мкс
+    DS18B20_PIN_DIR &= ~DS18B20_PIN; // Пин как вход
+                                     //   DS18B20_PIN_OUT |= DS18B20_PIN;  // Включить подтяжку к VCC
+    __delay_cycles(70);              // Ожидание 70 мкс
+
+    // 2. Ожидание ответа датчика с таймаутом
+    while ((DS18B20_PIN_IN & DS18B20_PIN) && (timeoutCount < TIMEOUT))
+    {
+        timeoutCount++;
+    }
+
+    __delay_cycles(410);             // Завершение тайминга
+    return (timeoutCount < TIMEOUT); // 1 = датчик ответил, 0 = таймаут
 }
 
 void oneWireWrite(uint8_t data)
@@ -375,25 +459,14 @@ uint8_t oneWireRead()
 
 int16_t readDS18B20()
 {
-    uint16_t temp = TEMP_READ_ERROR;
-    uint8_t absence = 1; // отсутствие датчика
     uint32_t timeout = 0;
     const uint32_t CONVERSION_TIMEOUT_CYCLES = 850; // Для 1MHz ~750ms
 
     // 1. Reset и проверка присутствия
-    DS18B20_PIN_DIR |= DS18B20_PIN;
-    DS18B20_PIN_OUT &= ~DS18B20_PIN;
-    __delay_cycles(480); // Reset pulse (минимум 480 мкс)
-    DS18B20_PIN_DIR &= ~DS18B20_PIN;
-    __delay_cycles(70); // Ожидание presence pulse (15-60 мкс)
-    absence = (DS18B20_PIN_IN & DS18B20_PIN);
-    __delay_cycles(410); // Завершение тайминга reset
-
-    if (absence)
-    { // No sensor connected
+    if (!oneWireReset())
+    {
         return TEMP_READ_ERROR;
     }
-
     // 2. Запуск преобразования
     oneWireWrite(0xCC); // Skip ROM
     oneWireWrite(0x44); // Convert T
@@ -401,13 +474,9 @@ int16_t readDS18B20()
     // 3. Ожидание завершения с таймаутом (~750ms)
     while (timeout++ < CONVERSION_TIMEOUT_CYCLES)
     {
-        __delay_cycles(1000); // Проверяем каждые 1ms
-
-        oneWireReset();
-        oneWireWrite(0xCC);
-        oneWireWrite(0xBE); // Читаем scratchpad
-        if (oneWireRead())
-            break; // Бит 0 = 1 -> преобразование завершено
+        __delay_cycles(1000); // Проверяем каждую 1ms
+        if (oneWireRead())    // Читаем целый байт - 8 раз запрос бита с корректными таймингами
+            break;            // если есть хоть одна 1 -> преобразование завершено
     }
 
     if (timeout >= CONVERSION_TIMEOUT_CYCLES)
@@ -416,9 +485,12 @@ int16_t readDS18B20()
     }
 
     // 4. Чтение результата
-    oneWireReset();
-    oneWireWrite(0xCC);
-    oneWireWrite(0xBE);
+    if (!oneWireReset())
+    {
+        return TEMP_READ_ERROR;
+    }
+    oneWireWrite(0xCC); // Skip ROM
+    oneWireWrite(0xBE); // Читаем scratchpad
 
     uint8_t lsb = oneWireRead();
     uint8_t msb = oneWireRead();
@@ -435,6 +507,32 @@ int16_t readDS18B20()
     return converted_temp; // Возвращаем знаковое число
 }
 
+#ifdef DEBUG_PID
+// Заголовок CSV
+void initPIDDebug()
+{
+    debugSerial.begin(38400);                                     // actual baud rate = 38400/16 = 2400 (library for 16MHz processors, but running @ 1MHz)
+    debugSerial.println("Error,P-Term,I-Term,D-Term,Output,PWM"); // CSV header
+}
+
+// Функция вывода данных в CSV формате
+void sendPIDDebug(int16_t error, int32_t p_term,
+                  int32_t i_term, int16_t d_term,
+                  int32_t output, uint16_t pwm)
+{
+    debugSerial.print(error);
+    debugSerial.print(',');
+    debugSerial.print(p_term);
+    debugSerial.print(',');
+    debugSerial.print(i_term);
+    debugSerial.print(',');
+    debugSerial.print(d_term);
+    debugSerial.print(',');
+    debugSerial.print(output);
+    debugSerial.print(',');
+    debugSerial.println(pwm);
+}
+#else
 void showLevel(uint8_t level, uint8_t pos)
 {
     uint8_t digits[1] = {0};
@@ -461,31 +559,5 @@ void showLevel(uint8_t level, uint8_t pos)
     }
 
     display.setSegments(digits, 1, pos);
-}
-
-#ifdef DEBUG_PID
-// Заголовок CSV
-void initPIDDebug()
-{
-    debugSerial.begin(9600);
-    debugSerial.println("Error,P-Term,I-Term,D-Term,Output,PWM"); // CSV header
-}
-
-// Функция вывода данных в CSV формате
-void sendPIDDebug(int16_t error, int32_t p_term,
-                  int32_t i_term, int16_t d_term,
-                  int32_t output, uint16_t pwm)
-{
-    debugSerial.print(error);
-    debugSerial.print(',');
-    debugSerial.print(p_term);
-    debugSerial.print(',');
-    debugSerial.print(i_term);
-    debugSerial.print(',');
-    debugSerial.print(d_term);
-    debugSerial.print(',');
-    debugSerial.print(output);
-    debugSerial.print(',');
-    debugSerial.println(pwm);
 }
 #endif
