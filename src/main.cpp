@@ -111,23 +111,13 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 #define TEMP_MEASURE_INTERVAL 30    // Измерение температуры каждые 30 сек (в PD_UPDATE_INTERVAL)
 
 // Глобальные переменные
-volatile uint16_t pwmCounter = 0;
+// volatile uint16_t pwmCounter = 0;
 volatile uint16_t updateCounter = 0;
 volatile uint8_t measureFlag = 0;
 volatile uint8_t updateFlag = 0;
-uint16_t adcValue = 0; // значние АЦП
-int16_t setpoint = 0;  // уставка
-int16_t temperature = 0;
-int32_t integral = 0; // Накопленная интегральная сумма (Q16.16)
-int16_t lastError = 0;
-uint16_t pwmValue = 0;
-uint16_t lastADC = 0;                     // последнее значение АЦП - нужно для детектирования изменения уставки
-boolean SPchangeFlag = false;             // Флаг значительного изменения уставки
-int16_t lastTemperature = 0;              // последнее значение температуры
-int32_t d_term = 0;                       // Дифференциальная составляющая
-int32_t filtered_d_term = 0;              // Отфильтрованное значение
-const int32_t INTEGRAL_MIN = -2147450879; // минимальное безопасное значение интеграла
-const int32_t INTEGRAL_MAX = 2147450879;  // максимальное безопасное значение интеграла
+
+const int32_t INTEGRAL_MAX = 2147483647 / KI - 1; // 2147450879;  // максимальное безопасное значение интеграла
+const int32_t INTEGRAL_MIN = -INTEGRAL_MAX;       //-2147450879; // минимальное безопасное значение интеграла
 
 TM1637TinyDisplay display(CLK, DIO); // 4-разрядный 7-сегментный дисплей с точками
 
@@ -149,7 +139,19 @@ void sendPIDDebug(int16_t error, int32_t p_term, int32_t i_term, int16_t d_term,
 
 int main(void)
 {
-    WDTCTL = WDTPW | WDTHOLD; // Остановить watchdog
+    uint16_t adcValue = 0; // значние АЦП
+    int16_t setpoint = 0;  // уставка
+    int16_t temperature = 0;
+    int32_t integral = 0; // Накопленная интегральная сумма (Q16.16)
+    int16_t lastError = 0;
+    uint16_t pwmValue = 0;
+    uint16_t lastADC = 0;         // последнее значение АЦП - нужно для детектирования изменения уставки
+    boolean SPchangeFlag = false; // Флаг значительного изменения уставки
+    int16_t lastTemperature = 0;  // последнее значение температуры
+    int32_t d_term = 0;           // Дифференциальная составляющая
+    int32_t filtered_d_term = 0;  // Отфильтрованное значение
+
+    WDTCTL = WDTPW | WDTHOLD;     // Остановить watchdog
 
     initClock();
     initGPIO();
@@ -349,6 +351,7 @@ void initADC()
 #pragma vector = TIMER0_A0_VECTOR
 __interrupt void Timer0_A0_ISR(void)
 {
+    static uint16_t pwmCounter = 0;
     pwmCounter++;
 
     // Обновление ПД-регулятора каждую секунду (1000 циклов при 1 кГц)
@@ -436,7 +439,6 @@ uint8_t oneWireRead()
 
 int16_t readDS18B20()
 {
-    uint16_t temp = TEMP_READ_ERROR;
     uint32_t timeout = 0;
     const uint32_t CONVERSION_TIMEOUT_CYCLES = 850; // Для 1MHz ~750ms
 
