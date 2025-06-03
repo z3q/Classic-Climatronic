@@ -117,7 +117,7 @@ volatile uint8_t measureFlag = 0;
 volatile uint8_t updateFlag = 0;
 
 const int32_t INTEGRAL_MAX = 2147483647L / KI - 1; // 2147450879;  // максимальное безопасное значение интеграла
-const int32_t INTEGRAL_MIN = -INTEGRAL_MAX;       //-2147450879; // минимальное безопасное значение интеграла
+const int32_t INTEGRAL_MIN = -INTEGRAL_MAX;        //-2147450879; // минимальное безопасное значение интеграла
 
 TM1637TinyDisplay display(CLK, DIO); // 4-разрядный 7-сегментный дисплей с точками
 
@@ -143,7 +143,6 @@ int main(void)
     int16_t setpoint = 0;  // уставка
     int16_t temperature = 0;
     int32_t integral = 0; // Накопленная интегральная сумма (Q16.16)
-    int16_t lastError = 0;
     uint16_t pwmValue = 0;
     uint16_t lastADC = 0;         // последнее значение АЦП - нужно для детектирования изменения уставки
     boolean SPchangeFlag = false; // Флаг значительного изменения уставки
@@ -151,7 +150,7 @@ int main(void)
     int32_t d_term = 0;           // Дифференциальная составляющая
     int32_t filtered_d_term = 0;  // Отфильтрованное значение
 
-    WDTCTL = WDTPW | WDTHOLD;     // Остановить watchdog
+    WDTCTL = WDTPW | WDTHOLD; // Остановить watchdog
 
     initClock();
     initGPIO();
