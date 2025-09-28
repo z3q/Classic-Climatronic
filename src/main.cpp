@@ -147,7 +147,7 @@ void showLevel(uint8_t level, uint8_t pos);
 
 int main(void)
 {
-    uint16_t adcValue = 0;   // значние АЦП
+    uint16_t adcValue = 512;   // значние АЦП, начальное значение - середина диапазона
     int16_t setpoint = 0;    // уставка
     int16_t temperature = 0; // измеренная температура
     int32_t integral = 0;    // Накопленная интегральная сумма (Q16.16)
@@ -210,7 +210,7 @@ int main(void)
 #endif
             }
 #ifndef DEBUG_PID
-            display.setBrightness(BRIGHT_1);
+            display.setBrightness(BRIGHT_2);
 #endif
             stateFlag &= ~STATE_SP_CHANGE; // SPchangeFlag = false;
         }
