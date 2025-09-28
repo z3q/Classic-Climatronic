@@ -94,7 +94,7 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 #define MAX_VALID_TEMP 80      // 80.0°C (максимальная возможная температура)
 #define TEMP_READ_ERROR 0x2000 // Значение при ошибке чтения
 
-#define SETPOINT_MIN_Q6 1472  // (16.0 * 64)  = 1024 (16.0°C в Q10.6) минимальная уставка // 23*64 = 1472 для отладки в жару
+#define SETPOINT_MIN_Q6 1024  // (16.0 * 64)  = 1024 (16.0°C в Q10.6) минимальная уставка // 23*64 = 1472 для отладки в жару
 #define SETPOINT_RANGE_Q6 600 // (9.375 * 64)  = 600 (9.375°C в Q10.6) диапазон уставки
 
 #define ADC_DEADZONE_LOW 250                                // Нижняя граница "мертвой зоны" АЦП
@@ -110,7 +110,13 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 #define PD_UPDATE_INTERVAL PWM_FREQ // Обновление ПИ каждую 1 сек (в периодах ШИМ)
 #define TEMP_MEASURE_INTERVAL 30    // Измерение температуры каждые 30 сек (в PD_UPDATE_INTERVAL)
 
+// Битовые маски переменной флагов
+#define STATE_MEASURE 0b00000001    // Маска флага измерения
+#define STATE_UPDATE 0b00000010     // Маска флага обновления ПИД
+#define STATE_SP_CHANGE 0b00000100  // Маска флага значительного изменения уставки
+
 // Глобальные переменные
+volatile uint8_t stateFlag = 0;     //флаги
 volatile uint16_t updateCounter = 0;
 volatile uint8_t measureFlag = 0;
 volatile uint8_t updateFlag = 0;
@@ -167,7 +173,8 @@ int main(void)
     __enable_interrupt();
 
     // Первое измерение температуры сразу
-    measureFlag = 1;
+    //measureFlag = 1;
+    stateFlag |= STATE_MEASURE;
 
     while (1)
     {
@@ -178,10 +185,11 @@ int main(void)
         int16_t error = 0;         // Ошибка
         int32_t integral_term = 0; // Интегральная составляющая
         int32_t p_term = 0;        // Пропорциональная составляющая
-        if (measureFlag)
+        if (stateFlag & STATE_MEASURE)
         {
             __disable_interrupt();
-            measureFlag = 0;
+            //measureFlag = 0;
+            stateFlag &= ~STATE_MEASURE;
             temperature = readDS18B20();
             __enable_interrupt();
 
@@ -384,7 +392,8 @@ __interrupt void Timer0_A0_ISR(void)
         if (updateCounter >= TEMP_MEASURE_INTERVAL)
         {
             updateCounter = 0;
-            measureFlag = 1;
+            //measureFlag = 1;
+            stateFlag |= STATE_MEASURE;
         }
         LPM3_EXIT;
     }
