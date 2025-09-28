@@ -70,7 +70,7 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 // Коэффициенты ПИД-регулятора (фиксированная точка Q8.8)
 #define KP 0x0060 // пропорциональнай коэффициент
 #define KD 0x0200 // дифференциальный коэффицинет
-#define KI 0x0da7 // интегральный коэффициент (использовать в расчете как (KI * integral) >> 16) 0,0003/сек точность Q16.16
+#define KI 0x0da7 // интегральный коэффициент (использовать в расчете как (KI * integral) >> 16) 0,05/сек точность Q16.16
 
 // Display connection pins (Digital Pins)
 #define CLK 14
@@ -111,15 +111,15 @@ SoftwareSerial debugSerial(DEBUG_RXD, DEBUG_TXD); // Инициализация 
 #define TEMP_MEASURE_INTERVAL 30    // Измерение температуры каждые 30 сек (в PD_UPDATE_INTERVAL)
 
 // Битовые маски переменной флагов
-#define STATE_MEASURE 0b00000001    // Маска флага измерения
-#define STATE_UPDATE 0b00000010     // Маска флага обновления ПИД
-#define STATE_SP_CHANGE 0b00000100  // Маска флага значительного изменения уставки
+#define STATE_MEASURE 0b00000001   // Маска флага измерения
+#define STATE_UPDATE 0b00000010    // Маска флага обновления ПИД
+#define STATE_SP_CHANGE 0b00000100 // Маска флага значительного изменения уставки
 
 // Глобальные переменные
-volatile uint8_t stateFlag = 0;     //флаги
+volatile uint8_t stateFlag = 0; // флаги
 volatile uint16_t updateCounter = 0;
-volatile uint8_t measureFlag = 0;
-volatile uint8_t updateFlag = 0;
+// volatile uint8_t measureFlag = 0;
+// volatile uint8_t updateFlag = 0;
 
 const int32_t INTEGRAL_MAX = 2147483647L / KI - 1; // 2147450879;  // максимальное безопасное значение интеграла
 const int32_t INTEGRAL_MIN = -INTEGRAL_MAX;        //-2147450879; // минимальное безопасное значение интеграла
@@ -147,16 +147,16 @@ void showLevel(uint8_t level, uint8_t pos);
 
 int main(void)
 {
-    uint16_t adcValue = 0; // значние АЦП
-    int16_t setpoint = 0;  // уставка
-    int16_t temperature = 0;
-    int32_t integral = 0; // Накопленная интегральная сумма (Q16.16)
+    uint16_t adcValue = 0;   // значние АЦП
+    int16_t setpoint = 0;    // уставка
+    int16_t temperature = 0; // измеренная температура
+    int32_t integral = 0;    // Накопленная интегральная сумма (Q16.16)
     uint16_t pwmValue = 0;
-    uint16_t lastADC = 0;         // последнее значение АЦП - нужно для детектирования изменения уставки
-    boolean SPchangeFlag = false; // Флаг значительного изменения уставки
-    int16_t lastTemperature = 0;  // последнее значение температуры
-    int32_t d_term = 0;           // Дифференциальная составляющая
-    int32_t filtered_d_term = 0;  // Отфильтрованное значение
+    uint16_t lastADC = 0; // последнее значение АЦП - нужно для детектирования изменения уставки
+    // boolean SPchangeFlag = false; // Флаг значительного изменения уставки
+    int16_t lastTemperature = 0; // последнее значение температуры
+    int32_t d_term = 0;          // Дифференциальная составляющая
+    int32_t filtered_d_term = 0; // Отфильтрованное значение
 
     WDTCTL = WDTPW | WDTHOLD; // Остановить watchdog
 
@@ -173,7 +173,7 @@ int main(void)
     __enable_interrupt();
 
     // Первое измерение температуры сразу
-    //measureFlag = 1;
+    // measureFlag = 1;
     stateFlag |= STATE_MEASURE;
 
     while (1)
@@ -188,7 +188,6 @@ int main(void)
         if (stateFlag & STATE_MEASURE)
         {
             __disable_interrupt();
-            //measureFlag = 0;
             stateFlag &= ~STATE_MEASURE;
             temperature = readDS18B20();
             __enable_interrupt();
@@ -199,7 +198,7 @@ int main(void)
                 int16_t dError = lastTemperature - temperature;
                 lastTemperature = temperature;
                 d_term = (int32_t)KD * (int32_t)dError; // Дифференциальная составляющая
-                filtered_d_term = (filtered_d_term + d_term) >> 1;
+                filtered_d_term = (filtered_d_term + d_term) / 2;
 #ifndef DEBUG_PID
                 display.showNumber((int)((temperature + 32) >> 6), false, 2, 2);
 #endif
@@ -213,13 +212,13 @@ int main(void)
 #ifndef DEBUG_PID
             display.setBrightness(BRIGHT_1);
 #endif
-            SPchangeFlag = false;
+            stateFlag &= ~STATE_SP_CHANGE; // SPchangeFlag = false;
         }
 
-        if (updateFlag)
+        if (stateFlag & STATE_UPDATE)
         {
             __disable_interrupt();
-            updateFlag = 0;
+            stateFlag &= ~STATE_UPDATE; // updateFlag = 0;
             __enable_interrupt();
             // Чтение уставки (0-1023 -> 160-250, фиксированная точка 10.6)
             adcValue = (adcValue + readADC()) >> 1; // Безопасно, так как значение АЦП 10-битное
@@ -227,7 +226,7 @@ int main(void)
             // Если поменяли уставку, увеличить яркость и отложить измерение температуры, совмещённое с понижением яркости
             if (abs((int)adcValue - (int)lastADC) > 10)
             {
-                SPchangeFlag = true;
+                stateFlag |= STATE_SP_CHANGE; // SPchangeFlag = true;
 #ifndef DEBUG_PID
                 display.setBrightness(BRIGHT_HIGH);
 #endif
@@ -272,7 +271,7 @@ int main(void)
                     // Расчет уставки с масштабированием на новый диапазон АЦП (100-923 → 0-823) // 16.0-25.3°C
                     setpoint = SETPOINT_MIN_Q6 + (scaledValue + (ADC_WORKZONE >> 1)) / ADC_WORKZONE;
 #ifndef DEBUG_PID
-                    if (SPchangeFlag)
+                    if (stateFlag & STATE_SP_CHANGE)
                     {
                         display.showNumberDec((int)(((int32_t)setpoint * 10 + 32) >> 6), 0b01000000, false, 3, 0); // Показать значение уставки с десятыми
                     }
@@ -385,14 +384,14 @@ __interrupt void Timer0_A0_ISR(void)
     if (pwmCounter >= PD_UPDATE_INTERVAL)
     {
         pwmCounter = 0;
-        updateFlag = 1;
+        stateFlag |= STATE_UPDATE; // updateFlag = 1;
         updateCounter++;
 
         // Измерение температуры каждые 30 сек
         if (updateCounter >= TEMP_MEASURE_INTERVAL)
         {
             updateCounter = 0;
-            //measureFlag = 1;
+            // measureFlag = 1;
             stateFlag |= STATE_MEASURE;
         }
         LPM3_EXIT;
