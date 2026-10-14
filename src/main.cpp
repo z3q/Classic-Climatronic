@@ -139,10 +139,12 @@ Pin Functions:
 #define DEBUG_TX_PIN_OUT P1OUT
 #define DEBUG_TX_PIN     BIT1
 
-#define UART_BIT_CYCLES 104 // 1 MHz / 9600 baud
+#define UART_BIT_CYCLES 90 // 1 MHz / 9600 baud / =104
 
 static void uartTxByte(uint8_t b)
 {
+    __disable_interrupt();          // защищаем тайминг одного байта (~1 мс)
+
     // Start bit (low)
     DEBUG_TX_PIN_OUT &= ~DEBUG_TX_PIN;
     __delay_cycles(UART_BIT_CYCLES);
@@ -161,6 +163,8 @@ static void uartTxByte(uint8_t b)
     // Stop bit (high)
     DEBUG_TX_PIN_OUT |= DEBUG_TX_PIN;
     __delay_cycles(UART_BIT_CYCLES);
+
+    __enable_interrupt();
 }
 
 static void uartTxString(const char *s)
